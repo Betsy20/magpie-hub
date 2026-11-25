@@ -300,6 +300,36 @@ for (const source of sources) {
   });
 }
 
+/* 各来源作者的头像，存本地，页脚直接显示 */
+const authorDir = path.join(OUT_DIR, "authors");
+await mkdir(authorDir, { recursive: true });
+const authors = [];
+
+for (const source of sources.filter((item) => item.owner)) {
+  let avatar = null;
+  try {
+    const api =
+      source.provider === "gitee"
+        ? `https://gitee.com/api/v5/users/${source.owner}`
+        : `https://api.github.com/users/${source.owner}`;
+    const profile = await json(api);
+    if (profile?.avatar_url) {
+      const res = await fetch(profile.avatar_url, { headers: { "user-agent": UA } });
+      if (res.ok) {
+        const file = `${source.provider}-${source.owner}.png`;
+        await sharp(Buffer.from(await res.arrayBuffer()))
+          .resize(64, 64, { fit: "cover" })
+          .png({ compressionLevel: 9 })
+          .toFile(path.join(authorDir, file));
+        avatar = `data/authors/${file}`;
+      }
+    }
+  } catch (error) {
+    console.warn(`! avatar ${source.provider}:${source.owner} — ${error.message}`);
+  }
+  authors.push({ provider: source.provider, owner: source.owner, avatar });
+}
+
 /* npm 上有没有同名包：决定要不要显示 magpie:// 深链 */
 async function npmLatest(name) {
   try {
@@ -342,6 +372,7 @@ const snapshot = {
   schema: 2,
   generatedAt: new Date().toISOString(),
   sources: summary,
+  authors,
   pluginCount: all.length,
   plugins: all
 };

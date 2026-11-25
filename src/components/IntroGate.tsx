@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy } from "lucide-react";
+import { AppWindow, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -28,13 +28,15 @@ async function copy(text: string, message: string) {
 interface IntroGateProps {
   seconds: number;
   sample?: Plugin;
+  canOpenInMagpie: boolean;
+  isMobile: boolean;
 }
 
 /**
  * 开屏使用公告：倒计时结束前不提供关闭入口。
  * 被外部脚本摘掉会自动挂回去（JavaScript 客户端做不了绝对防绕过，只能做到这一步）。
  */
-export function IntroGate({ seconds, sample }: IntroGateProps) {
+export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroGateProps) {
   const params = new URLSearchParams(location.search);
   const forced = params.get("gate") === "1";
   const skipped = params.get("gate") === "0";
@@ -52,6 +54,17 @@ export function IntroGate({ seconds, sample }: IntroGateProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const prompt = buildPrompt(sample);
   const install = sample?.install ?? "magpie plugin add github:<作者>/<仓库>";
+  const onNpm = Boolean(sample?.npmVersion);
+
+  function installNow() {
+    if (onNpm && canOpenInMagpie && sample) {
+      window.location.href = `magpie://plugin?name=${encodeURIComponent(sample.repo)}`;
+      return;
+    }
+    void copyText(install).then((ok) => {
+      toast[ok ? "success" : "error"](ok ? "安装命令已复制" : "复制失败，请手动选中");
+    });
+  }
 
   const enter = useCallback(() => {
     setOpen(false);
@@ -136,15 +149,27 @@ export function IntroGate({ seconds, sample }: IntroGateProps) {
                   {install}
                 </code>
                 <Button
-                  size="sm"
+                  size="icon"
                   variant="secondary"
-                  className="h-8 shrink-0 px-2.5"
+                  className="size-8 shrink-0"
+                  aria-label="复制安装命令"
                   onClick={() => copy(install, "安装命令已复制")}
                 >
                   <Copy className="size-3.5" />
-                  复制
+                </Button>
+                <Button
+                  size="icon"
+                  className="size-8 shrink-0"
+                  aria-label={onNpm && canOpenInMagpie ? "在 magpie 中安装" : "安装（复制命令）"}
+                  title={onNpm && canOpenInMagpie ? "在 magpie 中打开，按 Install" : "复制安装命令"}
+                  onClick={installNow}
+                >
+                  <AppWindow className="size-3.5" />
                 </Button>
               </div>
+              {onNpm && canOpenInMagpie && (
+                <p className="text-xs text-muted-foreground">右侧按钮会在 magpie 里打开插件页，按 Install 完成。</p>
+              )}
             </section>
 
             <section className="space-y-2">

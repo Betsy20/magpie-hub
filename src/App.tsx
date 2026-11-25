@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { applyLive, fetchLive, loadSnapshot, type Plugin } from "@/lib/data";
+import { applyLive, fetchLive, loadSnapshot, type Author, type Plugin } from "@/lib/data";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +41,7 @@ function GithubMark({ className }: { className?: string }) {
 export default function App() {
   const [sources, setSources] = useState<SourceConfig[]>(defaultSources);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
+  const [authors, setAuthors] = useState<Author[]>([]);
   const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
   const [liveAt, setLiveAt] = useState<string | null>(null);
   const [rate, setRate] = useState<number | null>(null);
@@ -83,6 +84,16 @@ export default function App() {
   }, [isMobile]);
 
   const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? "MYCF711";
+  const avatarOf = (provider: string, owner: string) =>
+    authors.find((author) => author.provider === provider && author.owner === owner)?.avatar ?? null;
+  const authorGroups = (["github", "gitee"] as const)
+    .map((provider) => ({
+      provider,
+      items: sources
+        .filter((source) => source.provider === provider)
+        .map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) }))
+    }))
+    .filter((group) => group.items.length > 0);
 
   const isStarred = (plugin: Plugin) =>
     config.pins.includes(plugin.repo) || stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
@@ -152,6 +163,7 @@ export default function App() {
       if (snapshot?.plugins?.length) {
         setPlugins(snapshot.plugins);
         setSnapshotAt(snapshot.generatedAt);
+        setAuthors(snapshot.authors ?? []);
       }
       setLoading(false);
 
@@ -331,9 +343,18 @@ export default function App() {
                   }
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  <span className="font-mono text-[10px] opacity-60">{source.provider}</span>@{source.owner}
+                  {avatarOf(source.provider, source.owner) ? (
+                    <img
+                      src={new URL(avatarOf(source.provider, source.owner) as string, document.baseURI).href}
+                      alt=""
+                      className="size-4 rounded-full"
+                    />
+                  ) : (
+                    <span className="font-mono text-[10px] opacity-60">{source.provider}</span>
+                  )}
+                  @{source.owner}
                 </a>
               ))}
             </div>
@@ -408,25 +429,45 @@ export default function App() {
         </main>
 
         <footer className="mt-auto border-t">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-end gap-4 px-4 py-7 text-xs text-muted-foreground sm:px-6">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-6 text-xs text-muted-foreground sm:px-6">
             <a className="hover:text-foreground" href="https://github.com/yetone/magpie" target="_blank" rel="noreferrer">
               magpie
             </a>
-            {sources.map((source) => (
-              <a
-                key={`footer:${source.provider}:${source.owner}`}
-                className="hover:text-foreground"
-                href={
-                  source.provider === "gitee"
-                    ? `https://gitee.com/${source.owner}`
-                    : `https://github.com/${source.owner}`
-                }
-                target="_blank"
-                rel="noreferrer"
-              >
-                {source.owner}
-              </a>
-            ))}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+              {authorGroups.map((group) => (
+                <div key={group.provider} className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60">{group.provider}</span>
+                  <div className="flex items-center gap-2">
+                    {group.items.map((item) => (
+                      <a
+                        key={`${item.provider}:${item.owner}`}
+                        href={
+                          item.provider === "gitee"
+                            ? `https://gitee.com/${item.owner}`
+                            : `https://github.com/${item.owner}`
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 transition-colors hover:text-foreground"
+                      >
+                        {item.avatar ? (
+                          <img
+                            src={new URL(item.avatar, document.baseURI).href}
+                            alt=""
+                            className="size-5 rounded-full"
+                          />
+                        ) : (
+                          <span className="grid size-5 place-items-center rounded-full bg-muted text-[9px] uppercase">
+                            {item.owner.slice(0, 1)}
+                          </span>
+                        )}
+                        {item.owner}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </footer>
 
@@ -435,16 +476,17 @@ export default function App() {
           onOpenChange={setSettingsOpen}
           sources={sources}
           liveOnLoad={liveOnLoad}
-          snapshotAt={snapshotAt}
-          liveAt={liveAt}
-          rate={rate}
-          count={counts.all}
           saving={saving}
           onSave={handleSave}
           onReset={handleReset}
         />
 
-        <IntroGate seconds={config.gateSeconds} sample={sample} />
+        <IntroGate
+          seconds={config.gateSeconds}
+          sample={sample}
+          canOpenInMagpie={magpieOnline && !isMobile}
+          isMobile={isMobile}
+        />
       </div>
     </TooltipProvider>
   );

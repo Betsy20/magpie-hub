@@ -69,13 +69,7 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
         toast.error("复制失败，请手动选中命令");
         return;
       }
-      toast.success(
-        isMobile
-          ? "手机上没有 magpie，命令已复制，到电脑上执行"
-          : onNpm
-            ? "没检测到本机 magpie，命令已复制"
-            : "这个插件没发布到 npm，命令已复制，粘贴到终端即可"
-      );
+      toast.success(isMobile ? "安装命令已复制" : onNpm ? "没检测到本机 magpie，命令已复制" : "命令已复制，粘贴到终端即可");
     });
   }
 
@@ -178,7 +172,7 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
                 onNpm && canOpenInMagpie
                   ? "在 magpie 面板中打开，由你确认安装"
                   : isMobile
-                    ? "手机端：复制命令，到电脑上安装"
+                    ? "复制安装命令"
                     : onNpm
                       ? "没检测到本机 magpie，点击复制命令"
                       : "未发布到 npm，点击复制命令"

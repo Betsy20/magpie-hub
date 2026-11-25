@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generatedAt": "2026-11-25T18:49:45.068Z",
+  "generatedAt": "2026-11-25T19:20:59.203Z",
   "sources": [
     {
       "provider": "github",
@@ -19,6 +19,23 @@
       "owner": "3294798852",
       "repoCount": 32,
       "pluginCount": 3
+    }
+  ],
+  "authors": [
+    {
+      "provider": "github",
+      "owner": "MYCF711",
+      "avatar": "data/authors/github-MYCF711.png"
+    },
+    {
+      "provider": "gitee",
+      "owner": "Ghandi",
+      "avatar": "data/authors/gitee-Ghandi.png"
+    },
+    {
+      "provider": "github",
+      "owner": "3294798852",
+      "avatar": "data/authors/github-3294798852.png"
     }
   ],
   "pluginCount": 28,

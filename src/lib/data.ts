@@ -24,6 +24,12 @@ export interface Plugin {
   install: string;
 }
 
+export interface Author {
+  provider: Provider;
+  owner: string;
+  avatar: string | null;
+}
+
 export interface SourceSummary {
   provider: Provider;
   owner: string;
@@ -35,6 +41,7 @@ export interface Snapshot {
   schema: number;
   generatedAt: string;
   sources: SourceSummary[];
+  authors?: Author[];
   pluginCount: number;
   plugins: Plugin[];
 }

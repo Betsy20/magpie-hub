@@ -12,10 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import type { Provider } from "@/lib/data";
-import { formatTime } from "@/lib/format";
 
 export interface SourceConfig {
   provider: Provider;
@@ -38,10 +36,6 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   sources: SourceConfig[];
   liveOnLoad: boolean;
-  snapshotAt: string | null;
-  liveAt: string | null;
-  rate: number | null;
-  count: number;
   saving: boolean;
   onSave: (sources: SourceConfig[], liveOnLoad: boolean) => void;
   onReset: () => void;
@@ -52,10 +46,6 @@ export function SettingsDialog({
   onOpenChange,
   sources,
   liveOnLoad,
-  snapshotAt,
-  liveAt,
-  rate,
-  count,
   saving,
   onSave,
   onReset
@@ -165,32 +155,14 @@ export function SettingsDialog({
             <Switch id="settings-live" checked={draftLive} onCheckedChange={setDraftLive} />
           </div>
 
-          <div className="rounded-lg bg-muted/50 p-3 text-xs">
-            <div className="flex items-center justify-between gap-3 py-0.5">
-              <span className="shrink-0 text-muted-foreground">本地快照</span>
-              <span className="truncate font-mono">
-                {snapshotAt ? `${formatTime(snapshotAt)} · ${count} 个` : "未构建"}
-              </span>
-            </div>
-            <Separator className="my-1.5" />
-            <div className="flex items-center justify-between gap-3 py-0.5">
-              <span className="shrink-0 text-muted-foreground">最近同步</span>
-              <span className="truncate font-mono">{liveAt ? formatTime(liveAt) : "本次未同步"}</span>
-            </div>
-            <Separator className="my-1.5" />
-            <div className="flex items-center justify-between gap-3 py-0.5">
-              <span className="shrink-0 text-muted-foreground">接口配额</span>
-              <span className="truncate font-mono">{rate === null ? "—" : `${rate} 次 / 小时`}</span>
-            </div>
-          </div>
         </div>
 
-        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-          <Button variant="ghost" className="text-muted-foreground" onClick={onReset}>
+        <DialogFooter className="sticky bottom-0 -mx-4 -mb-4 flex-row items-center justify-between gap-2 border-t bg-card px-4 py-3 sm:-mx-6 sm:-mb-6">
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onReset}>
             <RotateCcw className="size-4" />
             清除本地数据
           </Button>
-          <Button disabled={saving || draft.length === 0} onClick={() => onSave(draft, draftLive)}>
+          <Button size="sm" disabled={saving || draft.length === 0} onClick={() => onSave(draft, draftLive)}>
             {saving ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
             保存并同步
           </Button>
