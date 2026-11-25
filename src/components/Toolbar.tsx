@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AuthorAvatar } from "@/components/AuthorAvatar";
 import type { Provider } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
@@ -24,19 +25,17 @@ interface ToolbarProps {
   authors: AuthorOption[];
   ownerFilter: string | null;
   onOwnerFilterChange: (key: string | null) => void;
-  total: number;
 }
 
-const FILTERS: { value: Filter; label: string }[] = [
+export const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "全部" },
   { value: "active", label: "可用" },
   { value: "starred", label: "收藏" },
   { value: "paused", label: "已停维护" }
 ];
 
-const keyOf = (author: AuthorOption) => `${author.provider}:${author.owner}`;
+const keyOf = (author: AuthorOption) => `${author.provider}:${author.owner.toLowerCase()}`;
 
-/** 药丸按钮：选中时是黑字 + 深一点的描边，选中态不靠颜色靠对比度 */
 const pill = (active: boolean) =>
   cn(
     "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[12.5px] transition-colors",
@@ -55,8 +54,7 @@ export function Toolbar({
   counts,
   authors,
   ownerFilter,
-  onOwnerFilterChange,
-  total
+  onOwnerFilterChange
 }: ToolbarProps) {
   return (
     <div className="space-y-2.5">
@@ -86,7 +84,7 @@ export function Toolbar({
         </Select>
       </div>
 
-      <div className="scrollbar-none -mx-1 flex max-w-full min-w-0 gap-1.5 overflow-x-auto px-1 pb-0.5">
+      <div className="scrollbar-none -mx-1 flex min-w-0 max-w-full gap-1.5 overflow-x-auto px-1 pb-0.5">
         {FILTERS.map((item) => {
           const active = filter === item.value;
           return (
@@ -98,22 +96,15 @@ export function Toolbar({
               className={pill(active)}
             >
               {item.label}
-              <span className="tabular-nums text-ink-3">
-                {item.value === "all" ? total : counts[item.value]}
-              </span>
+              <span className="tabular-nums text-ink-3">{counts[item.value]}</span>
             </button>
           );
         })}
       </div>
 
       {authors.length > 1 && (
-        <div className="scrollbar-none -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5">
-          <button
-            type="button"
-            onClick={() => onOwnerFilterChange(null)}
-            aria-pressed={ownerFilter === null}
-            className={pill(ownerFilter === null)}
-          >
+        <div className="scrollbar-none -mx-1 flex min-w-0 max-w-full items-center gap-1.5 overflow-x-auto px-1 pb-0.5">
+          <button type="button" onClick={() => onOwnerFilterChange(null)} aria-pressed={ownerFilter === null} className={pill(ownerFilter === null)}>
             全部作者
           </button>
           {authors.map((author) => {
@@ -125,20 +116,9 @@ export function Toolbar({
                 type="button"
                 onClick={() => onOwnerFilterChange(active ? null : key)}
                 aria-pressed={active}
-                className={cn(pill(active), "gap-1.5 pl-1.5 pr-3")}
+                className={cn(pill(active), "py-1 pl-1.5 pr-3")}
               >
-                {author.avatar ? (
-                  <img
-                    src={new URL(author.avatar, document.baseURI).href}
-                    alt=""
-                    className="size-5 rounded-full border"
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className="grid size-5 place-items-center rounded-full border bg-secondary text-[9px] uppercase text-ink-3">
-                    {author.owner.slice(0, 1)}
-                  </span>
-                )}
+                <AuthorAvatar src={author.avatar} name={author.owner} className="size-5 rounded-full" />
                 {author.owner}
               </button>
             );

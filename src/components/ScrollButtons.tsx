@@ -9,9 +9,20 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 /** 用 motion 做缓动滚动；环境不跑动画帧时，结束后直接跳到位。 */
 function scrollToY(target: number) {
   const root = document.documentElement;
-  const from = window.scrollY || root.scrollTop || 0;
+  const from = root.scrollTop || window.scrollY || 0;
   const distance = Math.abs(target - from);
   if (distance < 2) return;
+
+  // 动画期间关掉 CSS smooth，否则每帧写 scrollTop 会和浏览器自己的平滑滚动打架
+  const previousBehavior = root.style.scrollBehavior;
+  root.style.scrollBehavior = "auto";
+
+  let cancelled = false;
+  const cancel = () => {
+    cancelled = true;
+  };
+  window.addEventListener("wheel", cancel, { passive: true, once: true });
+  window.addEventListener("touchstart", cancel, { passive: true, once: true });
 
   const duration = Math.min(0.9, 0.32 + distance / 7000);
   const controls = animate(from, target, {
@@ -25,13 +36,17 @@ function scrollToY(target: number) {
 
   window.setTimeout(() => {
     controls.stop();
-    const current = window.scrollY || root.scrollTop || 0;
-    if (Math.abs(current - target) < 8) return;
-    const previous = root.style.scrollBehavior;
-    root.style.scrollBehavior = "auto";
-    root.scrollTop = target;
-    document.body.scrollTop = target;
-    root.style.scrollBehavior = previous;
+    window.removeEventListener("wheel", cancel);
+    window.removeEventListener("touchstart", cancel);
+    root.style.scrollBehavior = previousBehavior;
+    if (cancelled) return;
+    const current = root.scrollTop || window.scrollY || 0;
+    if (Math.abs(current - target) >= 8) {
+      root.style.scrollBehavior = "auto";
+      root.scrollTop = target;
+      document.body.scrollTop = target;
+      root.style.scrollBehavior = previousBehavior;
+    }
   }, duration * 1000 + 250);
 }
 
@@ -44,11 +59,14 @@ export function ScrollButtons() {
       const root = document.documentElement;
       const y = window.scrollY || root.scrollTop || 0;
       const max = root.scrollHeight - root.clientHeight;
-      setState({
-        scrollable: max > 160,
-        atTop: y < 8,
-        atBottom: y > max - 8
-      });
+      const scrollable = max > 160;
+      const atTop = y < 8;
+      const atBottom = y > max - 8;
+      setState((previous) =>
+        previous.scrollable === scrollable && previous.atTop === atTop && previous.atBottom === atBottom
+          ? previous
+          : { scrollable, atTop, atBottom }
+      );
     };
     update();
     window.addEventListener("scroll", update, { passive: true });

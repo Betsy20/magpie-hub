@@ -70,7 +70,12 @@ export function SettingsDialog({
       toast.error("Gitee 作者要写进 config.json 再跑 npm run data");
       return;
     }
-    if (draft.some((item) => item.provider === parsed.provider && item.owner === parsed.owner)) {
+    if (
+      draft.some(
+        (item) =>
+          item.provider === parsed.provider && item.owner.toLowerCase() === parsed.owner.toLowerCase()
+      )
+    ) {
       toast.error("这个作者已经在列表里了");
       return;
     }
@@ -112,7 +117,13 @@ export function SettingsDialog({
                     aria-label={`移除 ${source.owner}`}
                     onClick={() =>
                       setDraft(
-                        draft.filter((item) => !(item.provider === source.provider && item.owner === source.owner))
+                        draft.filter(
+                          (item) =>
+                            !(
+                              item.provider === source.provider &&
+                              item.owner.toLowerCase() === source.owner.toLowerCase()
+                            )
+                        )
                       )
                     }
                   >

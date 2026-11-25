@@ -4,21 +4,27 @@ import { AppWindow, ArrowRight, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { copyWithToast } from "@/lib/clipboard";
+import { installOrCopy } from "@/lib/install";
 import type { Plugin } from "@/lib/data";
 import { storageKeys } from "@/lib/storage";
+import { AuthorAvatar } from "@/components/AuthorAvatar";
 
 const SEEN_TTL = 12 * 60 * 60 * 1000; // 12 小时内不再弹
 const LOGO = () => new URL("owner.png", document.baseURI).href;
 
+function fresh(value: string | null) {
+  const at = Number(value ?? 0);
+  return at > 0 && Date.now() - at < SEEN_TTL;
+}
+
 function hasSeen() {
   try {
-    if (sessionStorage.getItem(storageKeys.intro)) return true;
+    if (fresh(sessionStorage.getItem(storageKeys.intro))) return true;
   } catch {
     /* 忽略 */
   }
   try {
-    const at = Number(localStorage.getItem(storageKeys.intro) ?? 0);
-    return Date.now() - at < SEEN_TTL;
+    return fresh(localStorage.getItem(storageKeys.intro));
   } catch {
     return false;
   }
@@ -74,6 +80,7 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
   const prompt = buildPrompt(sample);
   const install = sample?.install ?? "magpie plugin add github:<作者>/<仓库>";
   const onNpm = Boolean(sample?.npmVersion);
+  const hasSample = Boolean(sample);
 
   const enter = useCallback(() => {
     setOpen(false);
@@ -95,10 +102,33 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
 
     const timer = window.setTimeout(() => setReady(true), Math.max(0, seconds) * 1000);
 
+    // 遮罩后面的页面全部 inert，键盘也走不出公告
+    const shells = Array.from(document.querySelectorAll<HTMLElement>("header, main, footer"));
+    shells.forEach((element) => {
+      element.inert = true;
+    });
+
     const blockKeys = (event: KeyboardEvent) => {
       if (event.key === "Escape" || event.key === "Esc") {
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const root = rootRef.current;
+      if (!root) return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex="-1"])')
+      );
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener("keydown", blockKeys, true);
@@ -119,6 +149,9 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener("keydown", blockKeys, true);
+      shells.forEach((element) => {
+        element.inert = false;
+      });
       observer.disconnect();
       document.body.style.overflow = previousOverflow;
     };
@@ -144,20 +177,20 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
               initial={{ opacity: 0, y: 14, scale: 0.985 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              className="w-full rounded-[16px] border bg-card p-4 text-card-foreground shadow-card sm:p-6"
+              className="w-full rounded-[16px] border bg-card p-4 text-ink shadow-card sm:p-6"
             >
               <div className="flex items-center gap-2">
-                <img src={LOGO()} alt="" width={24} height={24} className="size-6 rounded-md border object-cover" />
-                <h2 id="intro-gate-title" className="text-[18px] font-semibold tracking-[-0.01em] sm:text-[20px]">
+                <AuthorAvatar src="owner.png" name="M" className="size-6 rounded-md border" />
+                <h2 id="intro-gate-title" className="text-lg font-semibold tracking-tight sm:text-xl">
                   使用公告
                 </h2>
               </div>
 
               <div className="mt-4 space-y-4">
                 <section className="space-y-2">
-                  <p className="text-[13.5px] font-medium">1 · 复制指令直接安装</p>
+                  <p className="text-sm font-medium">1 · 复制指令直接安装</p>
                   <div className="flex items-start gap-2">
-                    <code className="scrollbar-none min-w-0 flex-1 overflow-x-auto rounded-lg border bg-code px-2.5 py-2 font-mono text-[12px] leading-relaxed whitespace-nowrap text-ink-2">
+                    <code className="scrollbar-none min-w-0 flex-1 overflow-x-auto rounded-lg border bg-code px-2.5 py-2 font-mono text-[11.5px] leading-relaxed whitespace-nowrap text-ink-2">
                       {install}
                     </code>
                     <Button
@@ -165,6 +198,7 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
                       variant="secondary"
                       className="size-8 shrink-0"
                       aria-label="复制安装命令"
+                      disabled={!hasSample}
                       onClick={() => copyWithToast(install, "安装命令已复制")}
                     >
                       <Copy className="size-3.5" />
@@ -173,6 +207,7 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
                       size="icon"
                       className="size-8 shrink-0"
                       aria-label={onNpm && canOpenInMagpie ? "在 magpie 中安装" : "安装（复制命令）"}
+                      disabled={!hasSample}
                       title={onNpm && canOpenInMagpie ? "在 magpie 中打开，按 Install" : "复制安装命令"}
                       onClick={installNow}
                     >
@@ -180,14 +215,14 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
                     </Button>
                   </div>
                   {onNpm && canOpenInMagpie && (
-                    <p className="text-[12px] text-ink-3">右侧按钮会在 magpie 里打开插件页，按 Install 完成。</p>
+                    <p className="text-xs text-ink-3">右侧按钮会在 magpie 里打开插件页，按 Install 完成。</p>
                   )}
                 </section>
 
                 <section className="space-y-2">
-                  <p className="text-[13.5px] font-medium">2 · 遇到问题，直接把这段发给你的 AI</p>
+                  <p className="text-sm font-medium">2 · 遇到问题，直接把这段发给你的 AI</p>
                   <div className="relative">
-                    <pre className="max-h-[34dvh] overflow-auto rounded-lg border bg-code p-3 pr-12 font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-ink-2">
+                    <pre className="max-h-[34dvh] overflow-auto rounded-lg border bg-bg-2 p-3 pr-12 font-mono text-[11.5px] leading-relaxed break-words whitespace-pre-wrap">
                       {prompt}
                     </pre>
                     <Tooltip>
@@ -197,6 +232,7 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
                           variant="secondary"
                           className="absolute right-2 top-2 size-7"
                           aria-label="复制这段描述"
+                          disabled={!hasSample}
                           onClick={() => copyWithToast(prompt, "问题描述已复制")}
                         >
                           <Copy className="size-3.5" />

@@ -24,3 +24,9 @@ export function writeJson(key: string, value: unknown) {
 }
 
 export const storageKeys = KEYS;
+
+/** 读一个字符串数组，坏数据（null/对象/旧格式）一律当空，避免整页崩掉。 */
+export function readStringArray(key: string): string[] {
+  const value = readJson<unknown>(key, []);
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}

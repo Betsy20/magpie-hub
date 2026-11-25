@@ -26,3 +26,14 @@ export function installTarget({ provider, owner, repo }) {
 export function installFor(plugin) {
   return `magpie plugin add ${installTarget(plugin)}`;
 }
+
+export const PAUSED_RE = /停止维护|暂停维护|deprecated|归档|archived/i;
+
+/**
+ * 是否已停维护：描述里写明，或者仓库本身归档了。
+ * @param {string} text 拼好的标题/描述/简介
+ * @param {boolean} [archived]
+ */
+export function isPaused(text, archived = false) {
+  return Boolean(archived) || PAUSED_RE.test(text ?? "");
+}

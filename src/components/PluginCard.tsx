@@ -1,20 +1,20 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { AppWindow, Copy, ExternalLink, Loader2, Star } from "lucide-react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Plugin } from "@/lib/data";
 import { installTarget } from "../../shared/filters.mjs";
-import { copyText, copyWithToast } from "@/lib/clipboard";
+import { copyWithToast } from "@/lib/clipboard";
+import { installOrCopy } from "@/lib/install";
 import { formatDate, initialOf } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface PluginCardProps {
   plugin: Plugin;
   starred: boolean;
-  onToggleStar: () => void;
+  onToggleStar: (plugin: Plugin) => void;
   starBusy?: boolean;
   canOpenInMagpie: boolean;
   isMobile: boolean;
@@ -30,7 +30,7 @@ function PluginLogo({ plugin }: { plugin: Plugin }) {
         alt={`${plugin.displayName} 图标`}
         loading="lazy"
         decoding="async"
-        className="size-10 shrink-0 rounded-[10px] border bg-card object-cover"
+        className="size-10 shrink-0 rounded-[10px] border object-cover"
         onError={() => setFailed(true)}
       />
     );
@@ -39,35 +39,26 @@ function PluginLogo({ plugin }: { plugin: Plugin }) {
   return (
     <span
       aria-hidden
-      className="grid size-10 shrink-0 place-items-center rounded-[10px] border bg-secondary text-[15px] font-semibold text-ink-2"
+      className="grid size-10 shrink-0 place-items-center rounded-[10px] border bg-code text-[13px] font-semibold text-ink-2"
     >
       {initialOf(plugin.displayName)}
     </span>
   );
 }
 
-export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInMagpie, isMobile }: PluginCardProps) {
+function PluginCardBase({ plugin, starred, onToggleStar, starBusy, canOpenInMagpie, isMobile }: PluginCardProps) {
   const repoUrl = plugin.repoUrl;
   const providers = plugin.providers ?? [];
   const target = installTarget(plugin);
   const onNpm = Boolean(plugin.npmVersion);
+  const repoPath = `${plugin.host}/${plugin.owner}/${plugin.repo}`;
 
   function copyInstall() {
     void copyWithToast(plugin.install, "安装命令已复制");
   }
 
   function openInMagpie() {
-    if (onNpm && canOpenInMagpie) {
-      window.location.href = `magpie://plugin?name=${encodeURIComponent(plugin.npmName ?? plugin.repo)}`;
-      return;
-    }
-    void copyText(plugin.install).then((ok) => {
-      if (!ok) {
-        toast.error("复制失败，请手动选中命令");
-        return;
-      }
-      toast.success(isMobile ? "安装命令已复制" : onNpm ? "没检测到本机 magpie，命令已复制" : "命令已复制，粘贴到终端即可");
-    });
+    installOrCopy(plugin, canOpenInMagpie);
   }
 
   return (
@@ -75,8 +66,7 @@ export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInM
       data-plugin={plugin.repo}
       data-provider={plugin.provider}
       className={cn(
-        "group flex min-w-0 flex-col transition-[border-color,box-shadow,transform] duration-200",
-        "hover:-translate-y-px hover:border-ink/20 hover:shadow-card",
+        "group flex min-w-0 flex-col transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-ink/20 hover:shadow-card",
         plugin.paused && "opacity-75"
       )}
     >
@@ -85,21 +75,13 @@ export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInM
           <PluginLogo plugin={plugin} />
 
           <div className="min-w-0 flex-1 space-y-1">
-            <CardTitle className="truncate text-[16px] leading-snug">
-              <a
-                href={repoUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="transition-colors hover:text-ink-2"
-              >
+            <CardTitle className="truncate text-[0.95rem] leading-snug">
+              <a href={repoUrl} target="_blank" rel="noreferrer" className="transition-colors hover:text-ink-2">
                 {plugin.displayName || plugin.repo}
               </a>
             </CardTitle>
-            <p
-              className="truncate font-mono text-[12px] leading-relaxed text-ink-3"
-              title={`${plugin.host}/${plugin.owner}/${plugin.repo}`}
-            >
-              {plugin.host}/{plugin.owner}/{plugin.repo}
+            <p className="truncate font-mono text-[0.7rem] text-ink-3" title={repoPath}>
+              {repoPath}
             </p>
           </div>
 
@@ -110,10 +92,9 @@ export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInM
                 size="icon"
                 className="size-7 shrink-0"
                 aria-pressed={starred}
-                aria-busy={starBusy}
                 aria-label={starred ? "取消 star" : "star 到 GitHub"}
                 disabled={starBusy}
-                onClick={onToggleStar}
+                onClick={() => onToggleStar(plugin)}
               >
                 {starBusy ? (
                   <Loader2 className="size-[15px] animate-spin text-ink-3" />
@@ -126,14 +107,14 @@ export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInM
           </Tooltip>
         </div>
 
-        <CardDescription className="line-clamp-3 min-h-[4.05rem] text-[14.5px] leading-relaxed">
+        <CardDescription className="line-clamp-3 min-h-[3.9rem] text-[0.8rem] leading-relaxed">
           {plugin.summary || plugin.description || "作者还没写简介。"}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="flex flex-wrap gap-1.5 px-4 pb-4 sm:px-5">
         {plugin.paused && (
-          <Badge variant="outline" className="border-dashed text-ink-3">
+          <Badge variant="outline" className="text-ink-3">
             已停维护
           </Badge>
         )}
@@ -150,17 +131,17 @@ export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInM
       </CardContent>
 
       <CardFooter className="mt-auto flex-col items-stretch gap-2.5 px-4 pb-4 pt-0 sm:px-5 sm:pb-5">
-<code className="block rounded-lg border bg-code px-2.5 py-2 font-mono text-[12px] leading-snug">
+        <code className="block rounded-lg border bg-code px-2.5 py-2 font-mono text-[12px] leading-snug">
           <span className="block text-[11px] text-ink-3">$ magpie plugin add</span>
-          <span className="block truncate text-ink/85">{target}</span>
+          <span className="block truncate text-ink-2">{target}</span>
         </code>
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[12px] tabular-nums text-ink-3">
+          <span className="truncate text-[0.7rem] text-ink-3">
             更新于 {formatDate(plugin.updatedAt)}
             {plugin.stars > 0 ? ` · ★ ${plugin.stars}` : ""}
           </span>
           <div className="flex shrink-0 items-center gap-1">
-            <Button size="sm" className="h-7 gap-1 px-2 text-[12px]" onClick={copyInstall}>
+            <Button variant="secondary" size="sm" className="h-7 gap-1 px-2 text-[12px]" onClick={copyInstall}>
               <Copy className="size-3.5" />
               复制
             </Button>
@@ -183,7 +164,7 @@ export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInM
               <AppWindow className="size-3.5" />
             </Button>
             <Button variant="ghost" size="icon" className="size-7" asChild>
-              <a href={repoUrl} target="_blank" rel="noreferrer" aria-label="打开 GitHub 仓库">
+              <a href={repoUrl} target="_blank" rel="noreferrer" aria-label="打开仓库">
                 <ExternalLink className="size-3.5" />
               </a>
             </Button>
@@ -193,3 +174,5 @@ export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInM
     </Card>
   );
 }
+
+export const PluginCard = memo(PluginCardBase);

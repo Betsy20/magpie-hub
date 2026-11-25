@@ -7,17 +7,20 @@
  * 数据源支持 GitHub 与 Gitee：作者的所有公开仓库，或单独指定的仓库。
  * 只用公开接口，不需要任何 token。
  */
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { installFor, isPluginRepo } from "../shared/filters.mjs";
+import { installFor, isPaused, isPluginRepo } from "../shared/filters.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const UA = "magpie-hub-build (+https://github.com/baijiu666/magpie-hub)";
 const OUT_DIR = path.join(ROOT, "public", "data");
-const ICON_DIR = path.join(OUT_DIR, "icons");
+// 先写到临时目录，整轮成功后再替换，抓取失败不会毁掉已提交的图标
+const ICON_DIR = path.join(OUT_DIR, ".icons-next");
+const ICON_FINAL = path.join(OUT_DIR, "icons");
 
 const config = JSON.parse(await readFile(path.join(ROOT, "config.json"), "utf8"));
+const include = new Set((config.include ?? []).map(String));
 const sources = (config.sources ?? [{ provider: "github", owner: config.owner }]).map((source) => ({
   provider: source.provider ?? "github",
   owner: source.owner ?? (source.repo ? source.repo.split("/")[0] : null),
@@ -33,6 +36,14 @@ async function get(url, accept = "application/json") {
 }
 
 const json = async (url) => (await get(url)).json();
+
+async function readLocalJson(file) {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
 
 async function text(url) {
   try {
@@ -133,7 +144,6 @@ async function writeIcon(plugin) {
 
 /* ---------------- 单个插件 ---------------- */
 
-const PAUSED_RE = /停止维护|暂停维护|deprecated|归档|archived/i;
 const pickZh = (summary) =>
   summary && typeof summary === "object" ? summary.zh || summary.en || "" : "";
 
@@ -195,7 +205,10 @@ async function detail(repo) {
   const keywords = Array.isArray(pkg?.keywords) ? pkg.keywords : [];
 
   const description = pkg?.description || repo.description || "";
-  const paused = PAUSED_RE.test(`${repo.name} ${repo.description} ${description} ${pickZh(entry?.summary)}`) || repo.archived;
+  const paused = isPaused(
+    `${repo.name} ${repo.description} ${description} ${pickZh(entry?.summary)}`,
+    repo.archived
+  );
 
   let summary = pickZh(entry?.summary);
   if (!summary) {
@@ -247,6 +260,7 @@ async function detail(repo) {
 
 const all = [];
 const summary = [];
+const failures = [];
 
 for (const source of sources) {
   let repos = [];
@@ -254,11 +268,13 @@ for (const source of sources) {
     repos = await listSource(source);
   } catch (error) {
     console.warn(`! ${source.provider}:${source.repo ?? source.owner} — ${error.message}`);
+    failures.push(`${source.provider}:${source.repo ?? source.owner} — ${error.message}`);
     summary.push({ provider: source.provider, owner: source.owner, repoCount: 0, pluginCount: 0 });
     continue;
   }
 
-  const picked = repos.filter((repo) => isPluginRepo(repo));
+  const included = (repo) => include.has(`${source.owner}/${repo.name}`);
+  const picked = repos.filter((repo) => included(repo) || isPluginRepo(repo));
   const details = [];
   for (let i = 0; i < picked.length; i += 6) {
     const slice = picked.slice(i, i + 6);
@@ -351,7 +367,7 @@ async function npmLatest(name) {
 }
 
 await Promise.all(all.map(async (plugin) => {
-  plugin.npmVersion = await npmLatest(plugin.npmName ?? plugin.repo);
+  plugin.npmVersion = plugin.npmName ? await npmLatest(plugin.npmName) : null;
 }));
 
 /* 站点 logo：第一个 GitHub 作者的头像，存成本地文件，页面不依赖外链 */
@@ -374,8 +390,29 @@ if (primaryGithub) {
 
 all.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
+/* 抓取不全就不落盘，避免定时任务把残缺快照提交上去 */
+if (failures.length) {
+  console.error(`有 ${failures.length} 个来源抓取失败：\n  ${failures.join("\n  ")}`);
+  if (process.env.MAGPIE_ALLOW_PARTIAL !== "1") {
+    console.error("拒绝写入快照（确需写成残缺数据请设 MAGPIE_ALLOW_PARTIAL=1）");
+    process.exit(1);
+  }
+}
+
+const previous = await readLocalJson(path.join(OUT_DIR, "plugins.json"));
+const previousCount = Array.isArray(previous?.plugins) ? previous.plugins.length : 0;
+if (previousCount && all.length < previousCount * 0.7 && process.env.MAGPIE_FORCE !== "1") {
+  console.error(
+    `插件数从 ${previousCount} 掉到 ${all.length}，可能是接口异常；确认无误请设 MAGPIE_FORCE=1 重跑`
+  );
+  process.exit(1);
+}
+
+// 整轮成功后再替换图标目录
+await rm(ICON_FINAL, { recursive: true, force: true });
+await rename(ICON_DIR, ICON_FINAL);
+
 const snapshot = {
-  generatedAt: new Date().toISOString(),
   authors,
   magpie: magpieAuthor,
   plugins: all

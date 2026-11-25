@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import {
@@ -12,6 +12,7 @@ import {
   SlidersHorizontal
 } from "lucide-react";
 import siteConfig from "../config.json";
+import { AuthorAvatar } from "@/components/AuthorAvatar";
 import { GithubMark } from "@/components/GithubMark";
 import { GithubDialog } from "@/components/GithubDialog";
 import { IntroGate } from "@/components/IntroGate";
@@ -19,7 +20,7 @@ import { PluginCard } from "@/components/PluginCard";
 import { ScrollButtons } from "@/components/ScrollButtons";
 import { SettingsDialog, type SourceConfig } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Toolbar, type Filter, type Sort } from "@/components/Toolbar";
+import { FILTERS, Toolbar, type Filter, type Sort } from "@/components/Toolbar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -57,12 +58,7 @@ const defaultSources: SourceConfig[] = (config.sources ?? [])
 const wrap = "mx-auto w-full max-w-[1080px] px-4 sm:px-6";
 
 /** 收起后的浮动条要把当前筛选状态写出来 */
-const FILTER_LABEL: Record<Filter, string> = {
-  all: "全部",
-  active: "可用",
-  starred: "收藏",
-  paused: "已停维护"
-};
+const LABEL_OF = (value: Filter) => FILTERS.find((item) => item.value === value)?.label ?? "全部";
 
 type Platform = "mac" | "windows" | "linux" | "other";
 
@@ -157,8 +153,8 @@ export default function App() {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [authors, setAuthors] = useState<Author[]>([]);
   const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
+  const [magpie, setMagpie] = useState<{ owner: string; avatar: string | null } | null>(null);
   const [liveAt, setLiveAt] = useState<string | null>(null);
-  const [rate, setRate] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -171,8 +167,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("updated");
-  const [channel, setChannel] = useState<Channel>("latest");
-  // 收藏 = GitHub 仓库的真实 star：token 只在本机，stars 缓存已 star 的 owner/repo
+const [channel, setChannel] = useState<Channel>("latest");
+  // 收藏 = GitHub 仓库的真实 star：token 只在本机，ghStars 缓存已 star 的 owner/repo
   const [ghToken, setGhToken] = useState<string>(() => readGithubToken());
   const [ghViewer, setGhViewer] = useState<GithubViewer | null>(null);
   const [ghStars, setGhStars] = useState<Set<string>>(() => new Set<string>());
@@ -199,15 +195,21 @@ export default function App() {
   const [magpieOnline, setMagpieOnline] = useState(false);
   useEffect(() => {
     if (isMobile) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 1500);
-    fetch("http://127.0.0.1:3425/", { mode: "no-cors", signal: controller.signal })
-      .then(() => setMagpieOnline(true))
-      .catch(() => setMagpieOnline(false))
-      .finally(() => window.clearTimeout(timer));
+    let timer = 0;
+    const probe = () => {
+      const controller = new AbortController();
+      timer = window.setTimeout(() => controller.abort(), 1500);
+      fetch("http://127.0.0.1:3425/", { mode: "no-cors", signal: controller.signal })
+        .then(() => setMagpieOnline(true))
+        .catch(() => setMagpieOnline(false))
+        .finally(() => window.clearTimeout(timer));
+    };
+    probe();
+    // magpie 可能稍后才启动，隔一会儿重探一次
+    const interval = window.setInterval(probe, 20000);
     return () => {
+      window.clearInterval(interval);
       window.clearTimeout(timer);
-      controller.abort();
     };
   }, [isMobile]);
 
@@ -229,24 +231,31 @@ export default function App() {
     };
   }, []);
 
-  const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? "MYCF711";
+const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? null;
+  const avatarMap = useMemo(
+    () => new Map(authors.map((author) => [`${author.provider}:${author.owner.toLowerCase()}`, author.avatar])),
+    [authors]
+  );
   const avatarOf = (provider: string, owner: string) =>
-    authors.find((author) => author.provider === provider && author.owner === owner)?.avatar ?? null;
-  const authorGroups = (["github", "gitee"] as const)
-    .map((provider) => ({
-      provider,
-      items: sources
-        .filter((source) => source.provider === provider)
-        .map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) }))
-    }))
-    .filter((group) => group.items.length > 0);
-  const authorOptions = sources.map((source) => ({
-    provider: source.provider,
-    owner: source.owner,
-    avatar: avatarOf(source.provider, source.owner)
-  }));
+    avatarMap.get(`${provider}:${owner.toLowerCase()}`) ?? null;
+  const authorGroups = useMemo(
+    () =>
+      (["github", "gitee"] as const)
+        .map((provider) => ({
+          provider,
+          items: sources
+            .filter((source) => source.provider === provider)
+            .map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) }))
+        }))
+        .filter((group) => group.items.length > 0),
+    [sources, avatarMap]
+  );
+  const authorOptions = useMemo(
+    () => sources.map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) })),
+    [sources, avatarMap]
+  );
 
-  const starKey = (plugin: Plugin) => `${plugin.owner}/${plugin.repo}`.toLowerCase();
+const starKey = (plugin: Plugin) => `${plugin.owner}/${plugin.repo}`.toLowerCase();
   const isStarred = (plugin: Plugin) => ghStars.has(starKey(plugin));
 
   async function sync(list: SourceConfig[] = sources, silent = false) {
@@ -256,21 +265,36 @@ export default function App() {
       return false;
     }
     setSyncing(true);
-    try {
-      for (const source of githubSources) {
-        const { repos, rate: remaining } = await fetchLive(source.owner);
-        setRate(remaining);
-        setPlugins((previous) => applyLive(source.owner, repos, previous));
+const results = await Promise.allSettled(githubSources.map((source) => fetchLive(source.owner)));
+    const fulfilled = results.flatMap((result, index) =>
+      result.status === "fulfilled" ? [{ owner: githubSources[index].owner, repos: result.value }] : []
+    );
+    const rejected = results.find((result) => result.status === "rejected");
+    const lastError =
+      rejected && rejected.status === "rejected"
+        ? rejected.reason instanceof Error
+          ? rejected.reason.message
+          : "同步失败"
+        : "";
+
+    setPlugins((previous) => fulfilled.reduce((acc, item) => applyLive(item.owner, item.repos, acc), previous));
+    setLiveAt(new Date().toISOString());
+    setSyncing(false);
+    const done = fulfilled.length;
+
+    if (!silent) {
+      if (done === 0) toast.error(lastError || "同步失败");
+      else if (done < githubSources.length) toast.warning(`同步了 ${done} 位作者，${lastError}`);
+      else {
+        const giteeCount = list.filter((source) => source.provider === "gitee" && source.owner).length;
+        toast.success(
+          giteeCount
+            ? `已同步 ${done} 位 GitHub 作者（Gitee ${giteeCount} 位由定时任务更新）`
+            : `已同步 ${done} 位作者的仓库列表`
+        );
       }
-      setLiveAt(new Date().toISOString());
-      if (!silent) toast.success(`已同步 ${githubSources.length} 位作者的仓库列表`);
-      return true;
-    } catch (error) {
-      if (!silent) toast.error(error instanceof Error ? error.message : "同步失败");
-      return false;
-    } finally {
-      setSyncing(false);
     }
+    return done > 0;
   }
 
   // 键盘：/ 聚焦搜索，Esc 清空搜索
@@ -280,7 +304,10 @@ export default function App() {
       const typing = target && /^(INPUT|TEXTAREA)$/.test(target.tagName);
       if (event.key === "/" && !typing && !document.getElementById("intro-gate")) {
         event.preventDefault();
-        document.querySelector<HTMLInputElement>('input[aria-label="搜索插件"]')?.focus();
+        setPanelExpanded(true);
+        window.requestAnimationFrame(() =>
+          document.querySelector<HTMLInputElement>('input[aria-label="搜索插件"]')?.focus()
+        );
       }
       if (event.key === "Escape" && typing) {
         setQuery("");
@@ -312,15 +339,31 @@ export default function App() {
       setSources(next);
 
       const snapshot = await loadSnapshot();
-      if (snapshot?.plugins?.length) {
-        setPlugins(snapshot.plugins);
-        setSnapshotAt(snapshot.generatedAt);
-        setAuthors(snapshot.authors ?? []);
+      const allowed = new Set(next.map((source) => `${source.provider}:${source.owner.toLowerCase()}`));
+      const kept = (snapshot?.plugins ?? []).filter((plugin) =>
+        allowed.has(`${plugin.provider}:${plugin.owner.toLowerCase()}`)
+      );
+      if (kept.length) {
+        setPlugins(kept);
+        setSnapshotAt(snapshot?.generatedAt ?? "");
+        setAuthors(snapshot?.authors ?? []);
+        setMagpie(snapshot?.magpie ?? null);
       }
       setLoading(false);
 
-      if (!snapshot?.plugins?.length || readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))) {
-        await sync(next, true);
+      // 快照里没有的作者（刚在设置里加的）或开了自动同步，都需要拉一次
+      const missingOwner = next.some(
+        (source) =>
+          source.provider === "github" &&
+          !kept.some((plugin) => plugin.owner.toLowerCase() === source.owner.toLowerCase())
+      );
+      if (
+        !kept.length ||
+        missingOwner ||
+        readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))
+      ) {
+        const ok = await sync(next, true);
+        if (!ok && !kept.length) toast.error("读取插件列表失败，点右上角「同步」重试");
       }
     })();
   }, []);
@@ -332,7 +375,12 @@ export default function App() {
 
   // 作者筛选作用在「可见」之上，状态与关键词再作用在这之上
   const pool = useMemo(
-    () => (ownerFilter ? visible.filter((plugin) => `${plugin.provider}:${plugin.owner}` === ownerFilter) : visible),
+    () =>
+      ownerFilter
+        ? visible.filter(
+            (plugin) => `${plugin.provider}:${plugin.owner.toLowerCase()}` === ownerFilter.toLowerCase()
+          )
+        : visible,
     [visible, ownerFilter]
   );
 
@@ -347,7 +395,7 @@ export default function App() {
       starred: pool.filter((plugin) => isStarred(plugin)).length,
       paused: pool.filter((plugin) => plugin.paused).length
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+// eslint-disable-next-line react-hooks/exhaustive-deps
     [pool, ghStars]
   );
 
@@ -373,14 +421,19 @@ export default function App() {
       return haystack.includes(q);
     });
 
-    const time = (plugin: Plugin) => new Date(plugin.updatedAt).getTime() || 0;
-
-    // 收藏只换图标，不参与排序：点一下不会让整页卡片跳位
-    return filtered.sort((a, b) => {
-      if (sort === "name") return (a.displayName || a.repo).localeCompare(b.displayName || b.repo, "zh-CN");
-      if (sort === "oldest") return time(a) - time(b);
-      return time(b) - time(a);
+    // 收藏只改图标，不参与排序，避免点一下整页卡片跳位
+    const decorated = filtered.map((plugin) => ({
+      plugin,
+      time: new Date(plugin.updatedAt).getTime() || 0
+    }));
+    decorated.sort((a, b) => {
+      if (sort === "name") {
+        return (a.plugin.displayName || a.plugin.repo).localeCompare(b.plugin.displayName || b.plugin.repo, "zh-CN");
+      }
+      if (sort === "oldest") return a.time - b.time;
+      return b.time - a.time;
     });
+    return decorated.map((item) => item.plugin);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pool, query, filter, sort, ghStars]);
 
@@ -516,7 +569,10 @@ export default function App() {
     // 被移除的作者，卡片一起撤掉；剩下的保持原样
     setPlugins((previous) =>
       previous.filter((plugin) =>
-        nextSources.some((source) => source.provider === plugin.provider && source.owner === plugin.owner)
+        nextSources.some(
+          (source) =>
+            source.provider === plugin.provider && source.owner.toLowerCase() === plugin.owner.toLowerCase()
+        )
       )
     );
 
@@ -526,17 +582,30 @@ export default function App() {
   }
 
   function handleReset() {
-    Object.values(storageKeys).forEach((key) => localStorage.removeItem(key));
+    try {
+      Object.values(storageKeys).forEach((key) => localStorage.removeItem(key));
+      localStorage.removeItem("theme");
+    } catch {
+      /* 存储被禁用也继续 */
+    }
     try {
       sessionStorage.removeItem(storageKeys.intro);
     } catch {
       /* 忽略 */
     }
     setSettingsOpen(false);
-    writeGithubToken("");
+writeGithubToken("");
     localStorage.removeItem("theme");
     setLiveOnLoad(Boolean(config.liveOnLoad));
     location.reload();
+  }
+
+  function scrollToTop() {
+    const root = document.documentElement;
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    window.scrollTo(0, 0);
+    root.style.scrollBehavior = previous;
   }
 
   const hasFilters = filter !== "all" || query.trim().length > 0 || ownerFilter !== null;
@@ -598,21 +667,22 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex min-h-dvh flex-col bg-background">
-        <header
+<header
           className={cn(
             "sticky top-0 z-40 bg-background/80 backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/68",
             scrolled && "border-b"
           )}
         >
           <div className={cn(wrap, "flex h-[60px] items-center gap-2.5 sm:gap-3")}>
-            <a href="./" className="flex shrink-0 items-center gap-2.5 whitespace-nowrap">
-              <img
-                src={new URL("owner.png", document.baseURI).href}
-                alt=""
-                width={24}
-                height={24}
-                className="size-6 rounded-md border object-cover"
-              />
+            <a
+              href="./"
+              onClick={(event) => {
+                event.preventDefault();
+                scrollToTop();
+              }}
+              className="flex shrink-0 items-center gap-2.5 whitespace-nowrap"
+            >
+              <AuthorAvatar src="owner.png" name={config.title} className="size-7 rounded-lg border" />
               <span className="text-[17px] font-[650] tracking-[-0.01em]">{config.title}</span>
             </a>
 
@@ -792,7 +862,6 @@ export default function App() {
               <span className="pb-1 text-[13px] text-ink-3">
                 {snapshotAt ? `快照 ${formatDate(snapshotAt)}` : "实时数据"}
                 {liveAt ? ` · 已同步 ${formatDate(liveAt)}` : ""}
-                {rate !== null ? ` · 剩余额度 ${rate}` : ""}
               </span>
             </div>
             <p className="mt-4 mb-7 max-w-[36em] text-[16px] text-ink-2 sm:text-[17px]">
@@ -815,8 +884,8 @@ export default function App() {
                   className="flex h-10 w-full items-center gap-2 rounded-full border bg-card px-3.5 text-[12px] text-ink-3"
                 >
                   <SlidersHorizontal className="size-3.5" />
-                  <span className="truncate text-ink">
-                    {FILTER_LABEL[filter]}
+<span className="truncate font-medium text-ink">
+                    {LABEL_OF(filter)}
                     {activeOwner ? ` · @${activeOwner}` : ""}
                     {query.trim() ? ` · “${query.trim()}”` : ""}
                   </span>
@@ -841,7 +910,6 @@ export default function App() {
                     authors={authorOptions}
                     ownerFilter={ownerFilter}
                     onOwnerFilterChange={setOwnerFilter}
-                    total={pool.length}
                   />
                 </motion.div>
               )}
@@ -993,13 +1061,17 @@ export default function App() {
 
             <div className="mt-10 flex flex-wrap justify-center gap-3">
               {[
-                { label: "数据快照", value: snapshotAt ? formatDate(snapshotAt) : "未生成", note: "npm run data" },
+                { label: "数据快照", value: snapshotAt ? formatDate(snapshotAt) : plugins.length ? "已加载" : "未生成", note: "npm run data" },
                 {
                   label: "本机 magpie",
                   value: magpieOnline ? "已连接" : "未检测到",
                   note: isMobile ? "手机端不探测" : "127.0.0.1:3425"
                 },
-                { label: "接口额度", value: rate !== null ? String(rate) : "—", note: "GitHub 60 次/小时" }
+                {
+                  label: "GitHub 收藏",
+                  value: ghViewer ? `@${ghViewer.login}` : "未连接",
+                  note: ghViewer ? `${ghStars.size} 个已 star` : "点右上角连接"
+                }
               ].map((cell) => (
                 <div
                   key={cell.label}
@@ -1014,35 +1086,43 @@ export default function App() {
           </section>
         </main>
 
-        <footer className="border-t py-7 text-[13.5px] text-ink-3">
-          <div className={cn(wrap, "flex flex-wrap items-center gap-x-6 gap-y-3")}>
-            <span>© 2026 {config.title} · 插件版权归各作者所有</span>
-            <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">
-              {authorGroups.map((group) =>
-                group.items.map((item) => (
-                  <a
-                    key={`foot:${item.provider}:${item.owner}`}
-                    href={
-                      item.provider === "gitee" ? `https://gitee.com/${item.owner}` : `https://github.com/${item.owner}`
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                    className="transition-colors hover:text-ink"
-                  >
-                    @{item.owner}
-                  </a>
-                ))
-              )}
-              <a
-                href="https://github.com/yetone/magpie"
-                target="_blank"
-                rel="noreferrer"
-                className="transition-colors hover:text-ink"
-              >
-                magpie
-              </a>
+        <footer className="border-t py-6 text-[13px] text-ink-3">
+          <div className={cn(wrap, "flex flex-wrap items-center justify-between gap-x-6 gap-y-4")}>
+            <a
+              href="https://github.com/yetone/magpie"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 transition-colors hover:text-ink"
+            >
+              <AuthorAvatar src={magpie?.avatar ?? null} name={magpie?.owner ?? "yetone"} className="size-5 rounded-full" />
+              magpie <span className="text-ink-3/70">@{magpie?.owner ?? "yetone"}</span>
+            </a>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+              {authorGroups.map((group) => (
+                <div key={group.provider} className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-[0.08em] text-ink-3/70">{group.provider}</span>
+                  <div className="flex items-center gap-2">
+                    {group.items.map((item) => (
+                      <a
+                        key={`foot:${item.provider}:${item.owner}`}
+                        href={item.provider === "gitee" ? `https://gitee.com/${item.owner}` : `https://github.com/${item.owner}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 transition-colors hover:text-ink",
+                          ownerFilter === `${item.provider}:${item.owner}` && "border-ink/30 text-ink"
+                        )}
+                      >
+                        <AuthorAvatar src={item.avatar} name={item.owner} className="size-5 rounded-full" />
+                        {item.owner}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
+          <div className={cn(wrap, "mt-4 text-[12.5px] text-ink-3/80")}>© 2026 {config.title} · 插件版权归各自作者所有</div>
         </footer>
 
         <ScrollButtons />
