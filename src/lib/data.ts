@@ -1,4 +1,4 @@
-import { installFor, isPluginRepo } from "../../shared/filters.mjs";
+import { installFor, isPaused, isPluginRepo } from "../../shared/filters.mjs";
 
 export type Provider = "github" | "gitee";
 
@@ -30,17 +30,17 @@ export interface Author {
 }
 
 export interface Snapshot {
-  generatedAt: string;
   authors?: Author[];
   magpie?: { owner: string; avatar: string | null };
   plugins: Plugin[];
 }
 
-const PAUSED_RE = /停止维护|暂停维护|deprecated|归档|archived/i;
-
 export async function loadSnapshot(): Promise<Snapshot | null> {
   try {
-    const res = await fetch(new URL("data/plugins.json", document.baseURI), { cache: "no-cache" });
+    const res = await fetch(new URL("data/plugins.json", document.baseURI), {
+      cache: "no-cache",
+      signal: AbortSignal.timeout(8000)
+    });
     if (!res.ok) return null;
     return (await res.json()) as Snapshot;
   } catch {
@@ -58,11 +58,10 @@ export interface LiveRepo {
   updated_at?: string;
 }
 
-export async function fetchLive(owner: string): Promise<{ repos: LiveRepo[]; rate: number | null }> {
+export async function fetchLive(owner: string): Promise<LiveRepo[]> {
   const repos: LiveRepo[] = [];
-  let rate: number | null = null;
 
-  for (let page = 1; page <= 3; page++) {
+  for (let page = 1; page <= 10; page++) {
     const res = await fetch(
       `https://api.github.com/users/${encodeURIComponent(owner)}/repos?per_page=100&sort=updated&page=${page}`,
       { headers: { accept: "application/vnd.github+json" }, cache: "no-store" }
@@ -71,14 +70,12 @@ export async function fetchLive(owner: string): Promise<{ repos: LiveRepo[]; rat
       const limited = res.status === 403 || res.status === 429;
       throw new Error(limited ? "GitHub 接口限流了，稍后再试" : `GitHub 返回 ${res.status}`);
     }
-    const header = res.headers.get("x-ratelimit-remaining");
-    if (header !== null) rate = Number(header);
     const batch = (await res.json()) as LiveRepo[];
     repos.push(...batch);
     if (batch.length < 100) break;
   }
 
-  return { repos, rate };
+  return repos;
 }
 
 export function fromLiveRepo(repo: LiveRepo, owner: string): Plugin {
@@ -99,7 +96,7 @@ export function fromLiveRepo(repo: LiveRepo, owner: string): Plugin {
     npmVersion: null,
     topics: repo.topics ?? [],
     stars: repo.stargazers_count ?? 0,
-    paused: PAUSED_RE.test(`${repo.name} ${description}`) || Boolean(repo.archived),
+    paused: isPaused(`${repo.name} ${description}`, Boolean(repo.archived)),
     updatedAt: repo.pushed_at ?? repo.updated_at ?? "",
     install: installFor({ provider: "github", owner, repo: repo.name })
   };
@@ -115,7 +112,7 @@ export function mergeLive(repos: LiveRepo[], owner: string, previous: Plugin[]):
       ...prev,
       updatedAt: repo.pushed_at ?? prev.updatedAt,
       stars: repo.stargazers_count ?? prev.stars,
-      paused: prev.paused || Boolean(repo.archived),
+      paused: isPaused(`${repo.name} ${repo.description ?? ""}`, Boolean(repo.archived)),
       topics: repo.topics?.length ? repo.topics : prev.topics,
       install: installFor({ provider: "github", owner, repo: repo.name })
     };

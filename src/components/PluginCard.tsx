@@ -1,20 +1,20 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { AppWindow, Copy, ExternalLink, Star } from "lucide-react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Plugin } from "@/lib/data";
 import { installTarget } from "../../shared/filters.mjs";
-import { copyText, copyWithToast } from "@/lib/clipboard";
+import { copyWithToast } from "@/lib/clipboard";
+import { installOrCopy } from "@/lib/install";
 import { formatDate, hueOf, initialOf } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface PluginCardProps {
   plugin: Plugin;
   starred: boolean;
-  onToggleStar: () => void;
+  onToggleStar: (plugin: Plugin) => void;
   canOpenInMagpie: boolean;
   isMobile: boolean;
 }
@@ -49,7 +49,7 @@ function PluginLogo({ plugin }: { plugin: Plugin }) {
   );
 }
 
-export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isMobile }: PluginCardProps) {
+function PluginCardBase({ plugin, starred, onToggleStar, canOpenInMagpie, isMobile }: PluginCardProps) {
   const repoUrl = plugin.repoUrl;
   const providers = plugin.providers ?? [];
   const target = installTarget(plugin);
@@ -60,17 +60,7 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
   }
 
   function openInMagpie() {
-    if (onNpm && canOpenInMagpie) {
-      window.location.href = `magpie://plugin?name=${encodeURIComponent(plugin.npmName ?? plugin.repo)}`;
-      return;
-    }
-    void copyText(plugin.install).then((ok) => {
-      if (!ok) {
-        toast.error("复制失败，请手动选中命令");
-        return;
-      }
-      toast.success(isMobile ? "安装命令已复制" : onNpm ? "没检测到本机 magpie，命令已复制" : "命令已复制，粘贴到终端即可");
-    });
+    installOrCopy(plugin, canOpenInMagpie);
   }
 
   return (
@@ -105,7 +95,7 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
                 className="size-8 shrink-0"
                 aria-pressed={starred}
                 aria-label={starred ? "取消收藏" : "收藏"}
-                onClick={onToggleStar}
+                onClick={() => onToggleStar(plugin)}
               >
                 <Star className={cn("size-4", starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />
               </Button>
@@ -191,3 +181,5 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
     </Card>
   );
 }
+
+export const PluginCard = memo(PluginCardBase);

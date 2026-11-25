@@ -44,10 +44,9 @@ npm run preview  # 本地预览产物
 | 字段 | 作用 |
 |---|---|
 | `sources` | 作者来源列表（GitHub / Gitee 可混排，`{provider, owner}`） |
-| `title` / `heading` | 站点名与页面大标题 |
+| `title` | 站点名（顶栏） |
 | `exclude` | 不展示的仓库（模板、归档、非插件） |
 | `include` | 强制展示不在 `magpie-*` 命名下的仓库 |
-| `pins` | 置顶仓库 |
 | `liveOnLoad` | 打开页面时是否用 GitHub API 实时同步一次 |
 | `gateSeconds` | 开屏公告的倒计时秒数 |
 

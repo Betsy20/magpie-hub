@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AuthorAvatar } from "@/components/AuthorAvatar";
 import type { Provider } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
@@ -24,17 +25,16 @@ interface ToolbarProps {
   authors: AuthorOption[];
   ownerFilter: string | null;
   onOwnerFilterChange: (key: string | null) => void;
-  total: number;
 }
 
-const FILTERS: { value: Filter; label: string }[] = [
+export const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "全部" },
   { value: "active", label: "可用" },
   { value: "starred", label: "收藏" },
   { value: "paused", label: "已停维护" }
 ];
 
-const keyOf = (author: AuthorOption) => `${author.provider}:${author.owner}`;
+const keyOf = (author: AuthorOption) => `${author.provider}:${author.owner.toLowerCase()}`;
 
 export function Toolbar({
   query,
@@ -46,8 +46,7 @@ export function Toolbar({
   counts,
   authors,
   ownerFilter,
-  onOwnerFilterChange,
-  total
+  onOwnerFilterChange
 }: ToolbarProps) {
   return (
     <div className="space-y-2.5">
@@ -91,9 +90,7 @@ export function Toolbar({
               )}
             >
               {item.label}
-              <span className="tabular-nums opacity-60">
-                {item.value === "all" ? total : counts[item.value]}
-              </span>
+              <span className="tabular-nums opacity-60">{counts[item.value]}</span>
             </button>
           );
         })}
@@ -130,18 +127,7 @@ export function Toolbar({
                     : "bg-card text-muted-foreground hover:text-foreground"
                 )}
               >
-                {author.avatar ? (
-                  <img
-                    src={new URL(author.avatar, document.baseURI).href}
-                    alt=""
-                    className="size-5 rounded-full"
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className="grid size-5 place-items-center rounded-full bg-muted text-[9px] uppercase">
-                    {author.owner.slice(0, 1)}
-                  </span>
-                )}
+                <AuthorAvatar src={author.avatar} name={author.owner} className="size-5 rounded-full" />
                 {author.owner}
               </button>
             );

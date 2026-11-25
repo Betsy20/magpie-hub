@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { ChevronDown, Loader2, Package, RefreshCw, SearchX, Settings2, SlidersHorizontal } from "lucide-react";
 import siteConfig from "../config.json";
+import { AuthorAvatar } from "@/components/AuthorAvatar";
 import { IntroGate } from "@/components/IntroGate";
 import { PluginCard } from "@/components/PluginCard";
 import { ScrollButtons } from "@/components/ScrollButtons";
 import { SettingsDialog, type SourceConfig } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Toolbar, type Filter, type Sort } from "@/components/Toolbar";
+import { FILTERS, Toolbar, type Filter, type Sort } from "@/components/Toolbar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { applyLive, fetchLive, loadSnapshot, type Author, type Plugin } from "@/lib/data";
-import { readJson, storageKeys, writeJson } from "@/lib/storage";
+import { readJson, readStringArray, storageKeys, writeJson } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
 const config = siteConfig as {
@@ -29,12 +30,7 @@ const defaultSources: SourceConfig[] = (config.sources ?? [])
   .filter((source) => source.owner)
   .map((source) => ({ provider: source.provider, owner: source.owner as string }));
 
-const FILTER_LABEL: Record<Filter, string> = {
-  all: "全部",
-  active: "可用",
-  starred: "收藏",
-  paused: "已停维护"
-};
+const LABEL_OF = (value: Filter) => FILTERS.find((item) => item.value === value)?.label ?? "全部";
 
 function GithubMark({ className }: { className?: string }) {
   return (
@@ -56,7 +52,7 @@ export default function App() {
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("updated");
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
-  const [stars, setStars] = useState<string[]>(() => readJson<string[]>(storageKeys.stars, []));
+  const [stars, setStars] = useState<string[]>(() => readStringArray(storageKeys.stars));
   const [liveOnLoad, setLiveOnLoad] = useState<boolean>(() =>
     readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))
   );
@@ -78,15 +74,21 @@ export default function App() {
   const [magpieOnline, setMagpieOnline] = useState(false);
   useEffect(() => {
     if (isMobile) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 1500);
-    fetch("http://127.0.0.1:3425/", { mode: "no-cors", signal: controller.signal })
-      .then(() => setMagpieOnline(true))
-      .catch(() => setMagpieOnline(false))
-      .finally(() => window.clearTimeout(timer));
+    let timer = 0;
+    const probe = () => {
+      const controller = new AbortController();
+      timer = window.setTimeout(() => controller.abort(), 1500);
+      fetch("http://127.0.0.1:3425/", { mode: "no-cors", signal: controller.signal })
+        .then(() => setMagpieOnline(true))
+        .catch(() => setMagpieOnline(false))
+        .finally(() => window.clearTimeout(timer));
+    };
+    probe();
+    // magpie 可能稍后才启动，隔一会儿重探一次
+    const interval = window.setInterval(probe, 20000);
     return () => {
+      window.clearInterval(interval);
       window.clearTimeout(timer);
-      controller.abort();
     };
   }, [isMobile]);
 
@@ -107,23 +109,32 @@ export default function App() {
   }, []);
 
   const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? null;
+  const avatarMap = useMemo(
+    () => new Map(authors.map((author) => [`${author.provider}:${author.owner.toLowerCase()}`, author.avatar])),
+    [authors]
+  );
   const avatarOf = (provider: string, owner: string) =>
-    authors.find((author) => author.provider === provider && author.owner === owner)?.avatar ?? null;
-  const authorGroups = (["github", "gitee"] as const)
-    .map((provider) => ({
-      provider,
-      items: sources
-        .filter((source) => source.provider === provider)
-        .map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) }))
-    }))
-    .filter((group) => group.items.length > 0);
-  const authorOptions = sources.map((source) => ({
-    provider: source.provider,
-    owner: source.owner,
-    avatar: avatarOf(source.provider, source.owner)
-  }));
+    avatarMap.get(`${provider}:${owner.toLowerCase()}`) ?? null;
+  const authorGroups = useMemo(
+    () =>
+      (["github", "gitee"] as const)
+        .map((provider) => ({
+          provider,
+          items: sources
+            .filter((source) => source.provider === provider)
+            .map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) }))
+        }))
+        .filter((group) => group.items.length > 0),
+    [sources, avatarMap]
+  );
+  const authorOptions = useMemo(
+    () => sources.map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) })),
+    [sources, avatarMap]
+  );
 
-  const isStarred = (plugin: Plugin) => stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
+  const starSet = useMemo(() => new Set(stars), [stars]);
+  const isStarred = (plugin: Plugin) =>
+    starSet.has(`${plugin.provider}:${plugin.owner.toLowerCase()}/${plugin.repo}`);
 
   async function sync(list: SourceConfig[] = sources, silent = false) {
     const githubSources = list.filter((source) => source.provider === "github" && source.owner);
@@ -132,23 +143,33 @@ export default function App() {
       return false;
     }
     setSyncing(true);
-    let done = 0;
-    let lastError = "";
-    for (const source of githubSources) {
-      try {
-        const { repos } = await fetchLive(source.owner);
-        setPlugins((previous) => applyLive(source.owner, repos, previous));
-        done += 1;
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : "同步失败";
-      }
-    }
+    const results = await Promise.allSettled(githubSources.map((source) => fetchLive(source.owner)));
+    const fulfilled = results.flatMap((result, index) =>
+      result.status === "fulfilled" ? [{ owner: githubSources[index].owner, repos: result.value }] : []
+    );
+    const rejected = results.find((result) => result.status === "rejected");
+    const lastError =
+      rejected && rejected.status === "rejected"
+        ? rejected.reason instanceof Error
+          ? rejected.reason.message
+          : "同步失败"
+        : "";
+
+    setPlugins((previous) => fulfilled.reduce((acc, item) => applyLive(item.owner, item.repos, acc), previous));
     setSyncing(false);
+    const done = fulfilled.length;
 
     if (!silent) {
       if (done === 0) toast.error(lastError || "同步失败");
       else if (done < githubSources.length) toast.warning(`同步了 ${done} 位作者，${lastError}`);
-      else toast.success(`已同步 ${done} 位作者的仓库列表`);
+      else {
+        const giteeCount = list.filter((source) => source.provider === "gitee" && source.owner).length;
+        toast.success(
+          giteeCount
+            ? `已同步 ${done} 位 GitHub 作者（Gitee ${giteeCount} 位由定时任务更新）`
+            : `已同步 ${done} 位作者的仓库列表`
+        );
+      }
     }
     return done > 0;
   }
@@ -161,7 +182,10 @@ export default function App() {
       const dialogOpen = Boolean(document.querySelector('[role="dialog"]'));
       if (event.key === "/" && !typing && !dialogOpen) {
         event.preventDefault();
-        document.querySelector<HTMLInputElement>('input[aria-label="搜索插件"]')?.focus();
+        setPanelExpanded(true);
+        window.requestAnimationFrame(() =>
+          document.querySelector<HTMLInputElement>('input[aria-label="搜索插件"]')?.focus()
+        );
       }
       if (event.key === "Escape" && typing && !dialogOpen) {
         setQuery("");
@@ -193,15 +217,30 @@ export default function App() {
       setSources(next);
 
       const snapshot = await loadSnapshot();
-      if (snapshot?.plugins?.length) {
-        setPlugins(snapshot.plugins);
-        setAuthors(snapshot.authors ?? []);
-        setMagpie(snapshot.magpie ?? null);
+      const allowed = new Set(next.map((source) => `${source.provider}:${source.owner.toLowerCase()}`));
+      const kept = (snapshot?.plugins ?? []).filter((plugin) =>
+        allowed.has(`${plugin.provider}:${plugin.owner.toLowerCase()}`)
+      );
+      if (kept.length) {
+        setPlugins(kept);
+        setAuthors(snapshot?.authors ?? []);
+        setMagpie(snapshot?.magpie ?? null);
       }
       setLoading(false);
 
-      if (!snapshot?.plugins?.length || readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))) {
-        await sync(next, true);
+      // 快照里没有的作者（刚在设置里加的）或开了自动同步，都需要拉一次
+      const missingOwner = next.some(
+        (source) =>
+          source.provider === "github" &&
+          !kept.some((plugin) => plugin.owner.toLowerCase() === source.owner.toLowerCase())
+      );
+      if (
+        !kept.length ||
+        missingOwner ||
+        readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))
+      ) {
+        const ok = await sync(next, true);
+        if (!ok && !kept.length) toast.error("读取插件列表失败，点右上角「同步」重试");
       }
     })();
   }, []);
@@ -211,7 +250,12 @@ export default function App() {
 
   const visible = useMemo(() => plugins.filter(isVisible), [plugins]);
   const pool = useMemo(
-    () => (ownerFilter ? visible.filter((plugin) => `${plugin.provider}:${plugin.owner}` === ownerFilter) : visible),
+    () =>
+      ownerFilter
+        ? visible.filter(
+            (plugin) => `${plugin.provider}:${plugin.owner.toLowerCase()}` === ownerFilter.toLowerCase()
+          )
+        : visible,
     [visible, ownerFilter]
   );
 
@@ -226,7 +270,7 @@ export default function App() {
       starred: pool.filter((plugin) => isStarred(plugin)).length,
       paused: pool.filter((plugin) => plugin.paused).length
     }),
-    [pool, stars]
+    [pool, starSet]
   );
 
   const rows = useMemo(() => {
@@ -251,24 +295,29 @@ export default function App() {
       return haystack.includes(q);
     });
 
-    const time = (plugin: Plugin) => new Date(plugin.updatedAt).getTime() || 0;
-
     // 收藏只改图标，不参与排序，避免点一下整页卡片跳位
-    return filtered.sort((a, b) => {
-      if (sort === "name") return (a.displayName || a.repo).localeCompare(b.displayName || b.repo, "zh-CN");
-      if (sort === "oldest") return time(a) - time(b);
-      return time(b) - time(a);
+    const decorated = filtered.map((plugin) => ({
+      plugin,
+      time: new Date(plugin.updatedAt).getTime() || 0
+    }));
+    decorated.sort((a, b) => {
+      if (sort === "name") {
+        return (a.plugin.displayName || a.plugin.repo).localeCompare(b.plugin.displayName || b.plugin.repo, "zh-CN");
+      }
+      if (sort === "oldest") return a.time - b.time;
+      return b.time - a.time;
     });
-  }, [pool, query, filter, sort, stars]);
+    return decorated.map((item) => item.plugin);
+  }, [pool, query, filter, sort, starSet]);
 
-  function toggleStar(plugin: Plugin) {
-    const id = `${plugin.provider}:${plugin.owner}/${plugin.repo}`;
+  const toggleStar = useCallback((plugin: Plugin) => {
+    const id = `${plugin.provider}:${plugin.owner.toLowerCase()}/${plugin.repo}`;
     setStars((previous) => {
       const next = previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id];
       writeJson(storageKeys.stars, next);
       return next;
     });
-  }
+  }, []);
 
   async function handleSave(nextSources: SourceConfig[], nextLive: boolean) {
     writeJson(storageKeys.sources, nextSources);
@@ -281,7 +330,10 @@ export default function App() {
     setOwnerFilter(null);
     setPlugins((previous) =>
       previous.filter((plugin) =>
-        nextSources.some((source) => source.provider === plugin.provider && source.owner === plugin.owner)
+        nextSources.some(
+          (source) =>
+            source.provider === plugin.provider && source.owner.toLowerCase() === plugin.owner.toLowerCase()
+        )
       )
     );
 
@@ -289,7 +341,12 @@ export default function App() {
   }
 
   function handleReset() {
-    Object.values(storageKeys).forEach((key) => localStorage.removeItem(key));
+    try {
+      Object.values(storageKeys).forEach((key) => localStorage.removeItem(key));
+      localStorage.removeItem("theme");
+    } catch {
+      /* 存储被禁用也继续 */
+    }
     try {
       sessionStorage.removeItem(storageKeys.intro);
     } catch {
@@ -297,7 +354,6 @@ export default function App() {
     }
     setSettingsOpen(false);
     setStars([]);
-    localStorage.removeItem("theme");
     setLiveOnLoad(Boolean(config.liveOnLoad));
     location.reload();
   }
@@ -328,13 +384,7 @@ export default function App() {
               }}
               className="flex shrink-0 items-center gap-2 font-semibold tracking-tight whitespace-nowrap"
             >
-              <img
-                src={new URL("owner.png", document.baseURI).href}
-                alt=""
-                width={32}
-                height={32}
-                className="size-8 rounded-lg border object-cover"
-              />
+              <AuthorAvatar src="owner.png" name={config.title} className="size-8 rounded-lg border" />
               <span className="text-[0.95rem] sm:text-base">{config.title}</span>
             </a>
 
@@ -389,7 +439,7 @@ export default function App() {
                 >
                   <SlidersHorizontal className="size-3.5" />
                   <span className="truncate text-foreground">
-                    {FILTER_LABEL[filter]}
+                    {LABEL_OF(filter)}
                     {activeOwner ? ` · @${activeOwner}` : ""}
                     {query.trim() ? ` · “${query.trim()}”` : ""}
                   </span>
@@ -414,7 +464,6 @@ export default function App() {
                     authors={authorOptions}
                     ownerFilter={ownerFilter}
                     onOwnerFilterChange={setOwnerFilter}
-                    total={pool.length}
                   />
                 </motion.div>
               )}
@@ -438,18 +487,18 @@ export default function App() {
               ))}
             </div>
           ) : rows.length ? (
-            <motion.div layout className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
               {rows.map((plugin) => (
                 <PluginCard
                   key={`${plugin.provider}:${plugin.owner}/${plugin.repo}`}
                   plugin={plugin}
                   starred={isStarred(plugin)}
-                  onToggleStar={() => toggleStar(plugin)}
+                  onToggleStar={toggleStar}
                   canOpenInMagpie={magpieOnline && !isMobile}
                   isMobile={isMobile}
                 />
               ))}
-            </motion.div>
+            </div>
           ) : (
             <div className="mt-2 flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-14 text-center sm:py-20">
               <span className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
@@ -485,11 +534,7 @@ export default function App() {
               target="_blank"
               rel="noreferrer"
             >
-              {magpie?.avatar ? (
-                <img src={new URL(magpie.avatar, document.baseURI).href} alt="" className="size-5 rounded-full" />
-              ) : (
-                <span className="grid size-5 place-items-center rounded-full bg-muted text-[9px] uppercase">Y</span>
-              )}
+              <AuthorAvatar src={magpie?.avatar ?? null} name={magpie?.owner ?? "yetone"} className="size-5 rounded-full" />
               magpie <span className="opacity-60">@{magpie?.owner ?? "yetone"}</span>
             </a>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
@@ -512,17 +557,7 @@ export default function App() {
                           ownerFilter === `${item.provider}:${item.owner}` && "border-primary/40 text-foreground"
                         )}
                       >
-                        {item.avatar ? (
-                          <img
-                            src={new URL(item.avatar, document.baseURI).href}
-                            alt=""
-                            className="size-5 rounded-full"
-                          />
-                        ) : (
-                          <span className="grid size-5 place-items-center rounded-full bg-muted text-[9px] uppercase">
-                            {item.owner.slice(0, 1)}
-                          </span>
-                        )}
+                        <AuthorAvatar src={item.avatar} name={item.owner} className="size-5 rounded-full" />
                         {item.owner}
                       </a>
                     ))}
