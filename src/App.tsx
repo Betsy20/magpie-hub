@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { toast } from "sonner";
-import { ArrowUpRight, ChevronDown, Download, Loader2, RefreshCw, SearchX, Settings2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronDown,
+  Download,
+  Loader2,
+  RefreshCw,
+  SearchX,
+  Settings2,
+  SlidersHorizontal
+} from "lucide-react";
 import siteConfig from "../config.json";
 import { IntroGate } from "@/components/IntroGate";
 import { PluginCard } from "@/components/PluginCard";
+import { ScrollButtons } from "@/components/ScrollButtons";
 import { SettingsDialog, type SourceConfig } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Toolbar, type Filter, type Sort } from "@/components/Toolbar";
@@ -23,7 +34,6 @@ const config = siteConfig as {
   sources: { provider: "github" | "gitee"; owner?: string; repo?: string }[];
   include: string[];
   exclude: string[];
-  pins: string[];
   liveOnLoad: boolean;
   gateSeconds: number;
 };
@@ -34,6 +44,14 @@ const defaultSources: SourceConfig[] = (config.sources ?? [])
 
 /** 版心与参考站一致：1080px */
 const wrap = "mx-auto w-full max-w-[1080px] px-4 sm:px-6";
+
+/** 收起后的浮动条要把当前筛选状态写出来 */
+const FILTER_LABEL: Record<Filter, string> = {
+  all: "全部",
+  active: "可用",
+  starred: "收藏",
+  paused: "已停维护"
+};
 
 function GithubMark({ className }: { className?: string }) {
   return (
@@ -142,6 +160,10 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [scrolledDown, setScrolledDown] = useState(false);
+  const [panelExpanded, setPanelExpanded] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  const [forceCollapsed] = useState(() => new URLSearchParams(location.search).get("panel") === "collapsed");
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -180,12 +202,22 @@ export default function App() {
     };
   }, [isMobile]);
 
-  // 顶部栏只在页面滚动后才出现下边线（参考站的做法）
+  // 顶部栏只在页面滚动后才出现下边线；滚过 200px 把搜索/筛选收成一条
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const update = () => {
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      setScrolled(y > 4);
+      setScrolledDown(y > 200);
+      if (y < 60) setPanelExpanded(false);
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    // 惯性滚动不一定每次都触发 scroll，低频兜底一次
+    const timer = window.setInterval(update, 500);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.clearInterval(timer);
+    };
   }, []);
 
   const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? "MYCF711";
@@ -199,9 +231,13 @@ export default function App() {
         .map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) }))
     }))
     .filter((group) => group.items.length > 0);
+  const authorOptions = sources.map((source) => ({
+    provider: source.provider,
+    owner: source.owner,
+    avatar: avatarOf(source.provider, source.owner)
+  }));
 
-  const isStarred = (plugin: Plugin) =>
-    config.pins.includes(plugin.repo) || stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
+  const isStarred = (plugin: Plugin) => stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
 
   async function sync(list: SourceConfig[] = sources, silent = false) {
     const githubSources = list.filter((source) => source.provider === "github" && source.owner);
@@ -250,10 +286,11 @@ export default function App() {
     booted.current = true;
 
     (async () => {
+      const signature = JSON.stringify(defaultSources);
       const stored = readJson<SourceConfig[]>(storageKeys.sources, []);
-      let next = (Array.isArray(stored) && stored.length ? stored : defaultSources).filter(
-        (source) => source?.provider && source?.owner
-      );
+      const storedSignature = readJson<string>(storageKeys.sourcesSig, "");
+      const useStored = Array.isArray(stored) && stored.length > 0 && storedSignature === signature;
+      let next = (useStored ? stored : defaultSources).filter((source) => source?.provider && source?.owner);
 
       const fromUrl = new URLSearchParams(location.search).get("owner");
       if (fromUrl) {
@@ -278,17 +315,20 @@ export default function App() {
     })();
   }, []);
 
-  useEffect(() => {
-    const visible = plugins.filter(
-      (plugin) => !config.exclude.includes(plugin.repo) || config.include.includes(plugin.repo)
-    ).length;
-    document.title = `${config.title} · ${visible} 个插件`;
-  }, [plugins]);
-
-  const pool = useMemo(
+  const visible = useMemo(
     () => plugins.filter((plugin) => !config.exclude.includes(plugin.repo) || config.include.includes(plugin.repo)),
     [plugins]
   );
+
+  // 作者筛选作用在「可见」之上，状态与关键词再作用在这之上
+  const pool = useMemo(
+    () => (ownerFilter ? visible.filter((plugin) => `${plugin.provider}:${plugin.owner}` === ownerFilter) : visible),
+    [visible, ownerFilter]
+  );
+
+  useEffect(() => {
+    document.title = `${config.title} · ${visible.length} 个插件`;
+  }, [visible.length]);
 
   const counts = useMemo<Record<Filter, number>>(
     () => ({
@@ -323,11 +363,10 @@ export default function App() {
       return haystack.includes(q);
     });
 
-    const weight = (plugin: Plugin) => (isStarred(plugin) ? 0 : 1);
     const time = (plugin: Plugin) => new Date(plugin.updatedAt).getTime() || 0;
 
+    // 收藏只换图标，不参与排序：点一下不会让整页卡片跳位
     return filtered.sort((a, b) => {
-      if (weight(a) !== weight(b)) return weight(a) - weight(b);
       if (sort === "name") return (a.displayName || a.repo).localeCompare(b.displayName || b.repo, "zh-CN");
       if (sort === "oldest") return time(a) - time(b);
       return time(b) - time(a);
@@ -346,10 +385,12 @@ export default function App() {
 
   async function handleSave(nextSources: SourceConfig[], nextLive: boolean) {
     writeJson(storageKeys.sources, nextSources);
+    writeJson(storageKeys.sourcesSig, JSON.stringify(defaultSources));
     writeJson(storageKeys.live, nextLive);
     setSources(nextSources);
     setLiveOnLoad(nextLive);
     setSettingsOpen(false);
+    setOwnerFilter(null);
 
     // 被移除的作者，卡片一起撤掉；剩下的保持原样
     setPlugins((previous) =>
@@ -365,13 +406,19 @@ export default function App() {
 
   function handleReset() {
     Object.values(storageKeys).forEach((key) => localStorage.removeItem(key));
+    try {
+      sessionStorage.removeItem(storageKeys.intro);
+    } catch {
+      /* 忽略 */
+    }
     setSettingsOpen(false);
     setStars([]);
+    localStorage.removeItem("theme");
     setLiveOnLoad(Boolean(config.liveOnLoad));
     location.reload();
   }
 
-  const hasFilters = filter !== "all" || query.trim().length > 0;
+  const hasFilters = filter !== "all" || query.trim().length > 0 || ownerFilter !== null;
   const sample = rows[0] ?? pool[0];
 
   const channels = useMemo(() => {
@@ -397,6 +444,9 @@ export default function App() {
   );
 
   
+
+  const collapsed = (forceCollapsed || scrolledDown) && !panelExpanded;
+  const activeOwner = ownerFilter?.split(":")[1] ?? null;
 
   const platform = useMemo<Platform>(() => detectPlatform(), []);
 
@@ -609,16 +659,52 @@ export default function App() {
               卡片里的命令直接贴进终端；发布到 npm 的插件，还可以在 magpie 面板里点一下安装。
             </p>
 
-            <div className="sticky top-[60px] z-30 -mx-4 bg-background/85 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
-              <Toolbar
-                query={query}
-                onQueryChange={setQuery}
-                filter={filter}
-                onFilterChange={setFilter}
-                sort={sort}
-                onSortChange={setSort}
-                counts={counts}
-              />
+            <div
+              className="sticky top-[60px] z-30 -mx-4 bg-background/85 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
+              data-collapsed={collapsed}
+              data-scrolled={scrolledDown}
+            >
+              {collapsed ? (
+                <motion.button
+                  key="mini"
+                  type="button"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                  onClick={() => setPanelExpanded(true)}
+                  className="flex h-10 w-full items-center gap-2 rounded-full border bg-card px-3.5 text-[12px] text-ink-3"
+                >
+                  <SlidersHorizontal className="size-3.5" />
+                  <span className="truncate text-ink">
+                    {FILTER_LABEL[filter]}
+                    {activeOwner ? ` · @${activeOwner}` : ""}
+                    {query.trim() ? ` · “${query.trim()}”` : ""}
+                  </span>
+                  <span className="tabular-nums">{rows.length} 个</span>
+                  <ChevronDown className="ml-auto size-4 shrink-0" />
+                </motion.button>
+              ) : (
+                <motion.div
+                  key="full"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                >
+                  <Toolbar
+                    query={query}
+                    onQueryChange={setQuery}
+                    filter={filter}
+                    onFilterChange={setFilter}
+                    sort={sort}
+                    onSortChange={setSort}
+                    counts={counts}
+                    authors={authorOptions}
+                    ownerFilter={ownerFilter}
+                    onOwnerFilterChange={setOwnerFilter}
+                    total={pool.length}
+                  />
+                </motion.div>
+              )}
             </div>
 
             {loading ? (
@@ -668,6 +754,7 @@ export default function App() {
                     onClick={() => {
                       setQuery("");
                       setFilter("all");
+                      setOwnerFilter(null);
                     }}
                   >
                     清除筛选
@@ -817,12 +904,13 @@ export default function App() {
           </div>
         </footer>
 
+        <ScrollButtons />
+
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           sources={sources}
           liveOnLoad={liveOnLoad}
-          saving={saving}
           onSave={handleSave}
           onReset={handleReset}
         />

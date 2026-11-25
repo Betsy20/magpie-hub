@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Database, Loader2, Plus, RotateCcw, X } from "lucide-react";
+import { Database, Plus, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,7 +36,6 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   sources: SourceConfig[];
   liveOnLoad: boolean;
-  saving: boolean;
   onSave: (sources: SourceConfig[], liveOnLoad: boolean) => void;
   onReset: () => void;
 }
@@ -46,7 +45,6 @@ export function SettingsDialog({
   onOpenChange,
   sources,
   liveOnLoad,
-  saving,
   onSave,
   onReset
 }: SettingsDialogProps) {
@@ -162,8 +160,8 @@ export function SettingsDialog({
             <RotateCcw className="size-4" />
             清除本地数据
           </Button>
-          <Button size="sm" disabled={saving || draft.length === 0} onClick={() => onSave(draft, draftLive)}>
-            {saving ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
+          <Button size="sm" disabled={draft.length === 0} onClick={() => onSave(draft, draftLive)}>
+            <Database className="size-4" />
             保存并同步
           </Button>
         </DialogFooter>

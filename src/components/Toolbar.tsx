@@ -1,10 +1,17 @@
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { Provider } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
 export type Filter = "all" | "active" | "starred" | "paused";
 export type Sort = "updated" | "name" | "oldest";
+
+export interface AuthorOption {
+  provider: Provider;
+  owner: string;
+  avatar: string | null;
+}
 
 interface ToolbarProps {
   query: string;
@@ -14,6 +21,10 @@ interface ToolbarProps {
   sort: Sort;
   onSortChange: (value: Sort) => void;
   counts: Record<Filter, number>;
+  authors: AuthorOption[];
+  ownerFilter: string | null;
+  onOwnerFilterChange: (key: string | null) => void;
+  total: number;
 }
 
 const FILTERS: { value: Filter; label: string }[] = [
@@ -23,63 +34,117 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "paused", label: "已停维护" }
 ];
 
-export function Toolbar({ query, onQueryChange, filter, onFilterChange, sort, onSortChange, counts }: ToolbarProps) {
+const keyOf = (author: AuthorOption) => `${author.provider}:${author.owner}`;
+
+/** 药丸按钮：选中时是黑字 + 深一点的描边，选中态不靠颜色靠对比度 */
+const pill = (active: boolean) =>
+  cn(
+    "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[12.5px] transition-colors",
+    active
+      ? "border-ink/30 bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0_/_0.04)]"
+      : "border-border bg-card text-ink-3 hover:border-ink/20 hover:text-ink"
+  );
+
+export function Toolbar({
+  query,
+  onQueryChange,
+  filter,
+  onFilterChange,
+  sort,
+  onSortChange,
+  counts,
+  authors,
+  ownerFilter,
+  onOwnerFilterChange,
+  total
+}: ToolbarProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-      <div className="relative min-w-[14rem] flex-1 basis-full sm:basis-0">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-[15px] -translate-y-1/2 text-ink-3" />
-        <Input
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="搜索插件、仓库、provider…"
-          aria-label="搜索插件"
-          className="h-10 rounded-[10px] border bg-card pl-9 text-[14px] shadow-none placeholder:text-ink-3 focus-visible:border-ink/30 focus-visible:ring-2 focus-visible:ring-ring/20"
-        />
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
+          <Input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="搜索插件、仓库、provider…"
+            aria-label="搜索插件"
+            className="h-10 rounded-[10px] bg-card pl-9 text-[14px]"
+          />
+        </div>
+        <Select value={sort} onValueChange={(value) => onSortChange(value as Sort)}>
+          <SelectTrigger
+            className="h-10 w-[116px] shrink-0 rounded-[10px] bg-card text-[13px] sm:w-[132px]"
+            aria-label="排序"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem value="updated">最近更新</SelectItem>
+            <SelectItem value="name">名称 A→Z</SelectItem>
+            <SelectItem value="oldest">最早更新</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="分类筛选"
-        className="scrollbar-none flex min-w-0 max-w-full items-center gap-0.5 overflow-x-auto rounded-[10px] border bg-bg-2 p-[3px]"
-      >
+      <div className="scrollbar-none -mx-1 flex max-w-full min-w-0 gap-1.5 overflow-x-auto px-1 pb-0.5">
         {FILTERS.map((item) => {
-          const on = filter === item.value;
+          const active = filter === item.value;
           return (
             <button
               key={item.value}
               type="button"
-              role="tab"
-              aria-selected={on}
               onClick={() => onFilterChange(item.value)}
-              className={cn(
-                "flex h-[30px] shrink-0 items-center gap-1.5 rounded-[7px] px-3 text-[13px] whitespace-nowrap transition-colors",
-                on
-                  ? "bg-card font-medium text-ink shadow-[0_0_0_1px_var(--line),0_1px_2px_rgb(0_0_0_/_0.08)]"
-                  : "text-ink-2 hover:text-ink"
-              )}
+              aria-pressed={active}
+              className={pill(active)}
             >
               {item.label}
-              <span className={cn("tabular-nums text-[12px]", on ? "text-ink-3" : "text-ink-3/80")}>
-                {counts[item.value]}
+              <span className="tabular-nums text-ink-3">
+                {item.value === "all" ? total : counts[item.value]}
               </span>
             </button>
           );
         })}
       </div>
 
-      <Select value={sort} onValueChange={(value) => onSortChange(value as Sort)}>
-        <SelectTrigger
-          className="h-10 w-full shrink-0 rounded-[10px] border bg-card text-[13px] sm:ml-auto sm:w-[128px]"
-          aria-label="排序"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent align="end">
-          <SelectItem value="updated">最近更新</SelectItem>
-          <SelectItem value="name">名称 A→Z</SelectItem>
-          <SelectItem value="oldest">最早更新</SelectItem>
-        </SelectContent>
-      </Select>
+      {authors.length > 1 && (
+        <div className="scrollbar-none -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5">
+          <button
+            type="button"
+            onClick={() => onOwnerFilterChange(null)}
+            aria-pressed={ownerFilter === null}
+            className={pill(ownerFilter === null)}
+          >
+            全部作者
+          </button>
+          {authors.map((author) => {
+            const key = keyOf(author);
+            const active = ownerFilter === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onOwnerFilterChange(active ? null : key)}
+                aria-pressed={active}
+                className={cn(pill(active), "gap-1.5 pl-1.5 pr-3")}
+              >
+                {author.avatar ? (
+                  <img
+                    src={new URL(author.avatar, document.baseURI).href}
+                    alt=""
+                    className="size-5 rounded-full border"
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="grid size-5 place-items-center rounded-full border bg-secondary text-[9px] uppercase text-ink-3">
+                    {author.owner.slice(0, 1)}
+                  </span>
+                )}
+                {author.owner}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

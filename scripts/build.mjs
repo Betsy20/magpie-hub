@@ -10,6 +10,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { installFor, isPluginRepo } from "../shared/filters.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const UA = "magpie-hub-build (+https://github.com/baijiu666/magpie-hub)";
@@ -44,13 +45,6 @@ async function text(url) {
 
 /* ---------------- 仓库列表 ---------------- */
 
-const isPluginRepo = (name, description, topics = []) => {
-  const lower = name.toLowerCase();
-  const hay = `${lower} ${description ?? ""} ${topics.join(" ")}`.toLowerCase();
-  if (lower.startsWith("dsh-")) return false;
-  return lower.startsWith("magpie-") || hay.includes("magpie-plugin") || hay.includes("magpie 插件");
-};
-
 async function listSource(source) {
   if (source.repo) {
     const [owner, repo] = source.repo.split("/");
@@ -83,7 +77,6 @@ function normalize(repo, provider, owner) {
     description: repo.description || "",
     stars: repo.stargazers_count ?? 0,
     topics: repo.topics ?? [],
-    license: typeof repo.license === "string" ? repo.license : (repo.license?.spdx_id ?? null),
     archived: Boolean(repo.archived),
     updatedAt: repo.pushed_at || repo.updated_at || ""
   };
@@ -126,7 +119,7 @@ async function writeIcon(plugin) {
   }
   if (!buffer?.length) return null;
 
-  const file = `${plugin.provider}-${plugin.repo}.png`;
+  const file = `${plugin.provider}-${plugin.owner}-${plugin.repo}.png`;
   try {
     await sharp(buffer)
       .resize(96, 96, { fit: "inside", withoutEnlargement: true })
@@ -175,11 +168,6 @@ function firstParagraph(markdown) {
     .trim();
 }
 
-const installFor = (plugin) =>
-  plugin.provider === "gitee"
-    ? `magpie plugin add git+https://gitee.com/${plugin.owner}/${plugin.repo}`
-    : `magpie plugin add github:${plugin.owner}/${plugin.repo}`;
-
 async function detail(repo) {
   const rawBase =
     repo.provider === "gitee"
@@ -207,7 +195,7 @@ async function detail(repo) {
   const keywords = Array.isArray(pkg?.keywords) ? pkg.keywords : [];
 
   const description = pkg?.description || repo.description || "";
-  const paused = PAUSED_RE.test(`${repo.name} ${repo.description} ${description} ${pickZh(entry?.summary)}`);
+  const paused = PAUSED_RE.test(`${repo.name} ${repo.description} ${description} ${pickZh(entry?.summary)}`) || repo.archived;
 
   let summary = pickZh(entry?.summary);
   if (!summary) {
@@ -232,14 +220,12 @@ async function detail(repo) {
     description,
     summary,
     version: pkg?.version || null,
+    npmName: typeof pkg?.name === "string" ? pkg.name : null,
     providers: Array.isArray(entry?.providers)
       ? entry.providers
       : Array.isArray(magpie.providers)
         ? magpie.providers
         : [],
-    license: pkg?.license || repo.license || null,
-    node: pkg?.engines?.node || null,
-    archived: repo.archived,
     paused,
     stars: repo.stars,
     topics: repo.topics,
@@ -272,7 +258,7 @@ for (const source of sources) {
     continue;
   }
 
-  const picked = repos.filter((repo) => isPluginRepo(repo.name, repo.description, repo.topics));
+  const picked = repos.filter((repo) => isPluginRepo(repo));
   const details = [];
   for (let i = 0; i < picked.length; i += 6) {
     const slice = picked.slice(i, i + 6);
@@ -330,6 +316,26 @@ for (const source of sources.filter((item) => item.owner)) {
   authors.push({ provider: source.provider, owner: source.owner, avatar });
 }
 
+/* magpie 本体作者的署名头像 */
+let magpieAuthor = { owner: "yetone", avatar: null };
+try {
+  const profile = await json("https://api.github.com/users/yetone");
+  if (profile?.avatar_url) {
+    const res = await fetch(profile.avatar_url, { headers: { "user-agent": UA } });
+    if (res.ok) {
+      const file = "yetone.png";
+      await mkdir(authorDir, { recursive: true });
+      await sharp(Buffer.from(await res.arrayBuffer()))
+        .resize(64, 64, { fit: "cover" })
+        .png({ compressionLevel: 9 })
+        .toFile(path.join(authorDir, file));
+      magpieAuthor = { owner: "yetone", avatar: `data/authors/${file}` };
+    }
+  }
+} catch (error) {
+  console.warn(`! magpie author avatar — ${error.message}`);
+}
+
 /* npm 上有没有同名包：决定要不要显示 magpie:// 深链 */
 async function npmLatest(name) {
   try {
@@ -345,7 +351,7 @@ async function npmLatest(name) {
 }
 
 await Promise.all(all.map(async (plugin) => {
-  plugin.npmVersion = await npmLatest(plugin.repo);
+  plugin.npmVersion = await npmLatest(plugin.npmName ?? plugin.repo);
 }));
 
 /* 站点 logo：第一个 GitHub 作者的头像，存成本地文件，页面不依赖外链 */
@@ -369,11 +375,9 @@ if (primaryGithub) {
 all.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
 const snapshot = {
-  schema: 2,
   generatedAt: new Date().toISOString(),
-  sources: summary,
   authors,
-  pluginCount: all.length,
+  magpie: magpieAuthor,
   plugins: all
 };
 

@@ -1,8 +1,9 @@
 const KEYS = {
-  owner: "magpiehub:owner",
   sources: "magpiehub:sources",
+  sourcesSig: "magpiehub:sources-sig",
   stars: "magpiehub:stars",
-  live: "magpiehub:live"
+  live: "magpiehub:live",
+  intro: "magpiehub:intro-seen"
 } as const;
 
 export function readJson<T>(key: string, fallback: T): T {

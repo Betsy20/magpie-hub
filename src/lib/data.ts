@@ -1,3 +1,5 @@
+import { installFor, isPluginRepo } from "../../shared/filters.mjs";
+
 export type Provider = "github" | "gitee";
 
 export interface Plugin {
@@ -10,15 +12,12 @@ export interface Plugin {
   description: string;
   summary: string;
   version: string | null;
+  npmName?: string | null;
   providers: string[];
-  license: string | null;
-  node: string | null;
   icon?: string | null;
   npmVersion?: string | null;
-  homepage: string | null;
   topics: string[];
   stars: number;
-  archived: boolean;
   paused: boolean;
   updatedAt: string;
   install: string;
@@ -30,29 +29,14 @@ export interface Author {
   avatar: string | null;
 }
 
-export interface SourceSummary {
-  provider: Provider;
-  owner: string;
-  repoCount: number;
-  pluginCount: number;
-}
-
 export interface Snapshot {
-  schema: number;
   generatedAt: string;
-  sources: SourceSummary[];
   authors?: Author[];
-  pluginCount: number;
+  magpie?: { owner: string; avatar: string | null };
   plugins: Plugin[];
 }
 
 const PAUSED_RE = /停止维护|暂停维护|deprecated|归档|archived/i;
-
-export const isPluginRepo = (repo: { name?: string; topics?: string[] }) => {
-  const name = (repo.name ?? "").toLowerCase();
-  const topics = (repo.topics ?? []).map((t) => t.toLowerCase());
-  return name.startsWith("magpie-") || topics.includes("magpie-plugin");
-};
 
 export async function loadSnapshot(): Promise<Snapshot | null> {
   try {
@@ -68,8 +52,6 @@ export interface LiveRepo {
   name: string;
   description: string | null;
   topics?: string[];
-  license?: { spdx_id?: string | null } | null;
-  homepage?: string | null;
   stargazers_count?: number;
   archived?: boolean;
   pushed_at?: string;
@@ -77,16 +59,26 @@ export interface LiveRepo {
 }
 
 export async function fetchLive(owner: string): Promise<{ repos: LiveRepo[]; rate: number | null }> {
-  const res = await fetch(
-    `https://api.github.com/users/${encodeURIComponent(owner)}/repos?per_page=100&sort=updated`,
-    { headers: { accept: "application/vnd.github+json" }, cache: "no-store" }
-  );
-  if (!res.ok) {
-    const limited = res.status === 403 || res.status === 429;
-    throw new Error(limited ? "GitHub 接口限流了，稍后再试" : `GitHub 返回 ${res.status}`);
+  const repos: LiveRepo[] = [];
+  let rate: number | null = null;
+
+  for (let page = 1; page <= 3; page++) {
+    const res = await fetch(
+      `https://api.github.com/users/${encodeURIComponent(owner)}/repos?per_page=100&sort=updated&page=${page}`,
+      { headers: { accept: "application/vnd.github+json" }, cache: "no-store" }
+    );
+    if (!res.ok) {
+      const limited = res.status === 403 || res.status === 429;
+      throw new Error(limited ? "GitHub 接口限流了，稍后再试" : `GitHub 返回 ${res.status}`);
+    }
+    const header = res.headers.get("x-ratelimit-remaining");
+    if (header !== null) rate = Number(header);
+    const batch = (await res.json()) as LiveRepo[];
+    repos.push(...batch);
+    if (batch.length < 100) break;
   }
-  const rate = res.headers.get("x-ratelimit-remaining");
-  return { repos: (await res.json()) as LiveRepo[], rate: rate === null ? null : Number(rate) };
+
+  return { repos, rate };
 }
 
 export function fromLiveRepo(repo: LiveRepo, owner: string): Plugin {
@@ -101,18 +93,15 @@ export function fromLiveRepo(repo: LiveRepo, owner: string): Plugin {
     description,
     summary: description,
     version: null,
+    npmName: null,
     providers: [],
-    license: repo.license?.spdx_id ?? null,
-    node: null,
     icon: null,
     npmVersion: null,
-    homepage: repo.homepage ?? null,
     topics: repo.topics ?? [],
     stars: repo.stargazers_count ?? 0,
-    archived: Boolean(repo.archived),
-    paused: PAUSED_RE.test(`${repo.name} ${description}`),
+    paused: PAUSED_RE.test(`${repo.name} ${description}`) || Boolean(repo.archived),
     updatedAt: repo.pushed_at ?? repo.updated_at ?? "",
-    install: `magpie plugin add github:${owner}/${repo.name}`
+    install: installFor({ provider: "github", owner, repo: repo.name })
   };
 }
 
@@ -126,11 +115,9 @@ export function mergeLive(repos: LiveRepo[], owner: string, previous: Plugin[]):
       ...prev,
       updatedAt: repo.pushed_at ?? prev.updatedAt,
       stars: repo.stargazers_count ?? prev.stars,
-      archived: Boolean(repo.archived),
       paused: prev.paused || Boolean(repo.archived),
       topics: repo.topics?.length ? repo.topics : prev.topics,
-      homepage: repo.homepage ?? prev.homepage,
-      install: `magpie plugin add github:${owner}/${repo.name}`
+      install: installFor({ provider: "github", owner, repo: repo.name })
     };
   });
 }
