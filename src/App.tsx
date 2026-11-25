@@ -215,11 +215,19 @@ const [channel, setChannel] = useState<Channel>("latest");
 
   // 顶部栏只在页面滚动后才出现下边线；滚过 200px 把搜索/筛选收成一条
   useEffect(() => {
+    let lastY = 0;
     const update = () => {
       const y = window.scrollY || document.documentElement.scrollTop || 0;
-      setScrolled(y > 4);
+setScrolled(y > 4);
+      const delta = y - lastY;
+      lastY = y;
       setScrolledDown(y > 200);
-      if (y < 60) setPanelExpanded(false);
+      if (y < 60) {
+        setPanelExpanded(false);
+      } else if (y > 200 && delta > 2) {
+        // 展开过一次也没用：继续往下滑就重新收成一条
+        setPanelExpanded(false);
+      }
     };
     update();
     window.addEventListener("scroll", update, { passive: true });
@@ -934,12 +942,13 @@ writeGithubToken("");
               </div>
             ) : rows.length ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-                {rows.map((plugin) => (
+                {rows.map((plugin, index) => (
                   <PluginCard
                     key={`${plugin.provider}:${plugin.owner}/${plugin.repo}`}
+                    index={index}
                     plugin={plugin}
                     starred={isStarred(plugin)}
-                    onToggleStar={() => void toggleStar(plugin)}
+                    onToggleStar={toggleStar}
                     starBusy={starBusy.has(starKey(plugin))}
                     canOpenInMagpie={magpieOnline && !isMobile}
                     isMobile={isMobile}

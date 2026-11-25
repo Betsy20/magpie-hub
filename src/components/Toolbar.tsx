@@ -36,14 +36,6 @@ export const FILTERS: { value: Filter; label: string }[] = [
 
 const keyOf = (author: AuthorOption) => `${author.provider}:${author.owner.toLowerCase()}`;
 
-const pill = (active: boolean) =>
-  cn(
-    "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[12.5px] transition-colors",
-    active
-      ? "border-ink/30 bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0_/_0.04)]"
-      : "border-border bg-card text-ink-3 hover:border-ink/20 hover:text-ink"
-  );
-
 export function Toolbar({
   query,
   onQueryChange,
@@ -70,10 +62,7 @@ export function Toolbar({
           />
         </div>
         <Select value={sort} onValueChange={(value) => onSortChange(value as Sort)}>
-          <SelectTrigger
-            className="h-10 w-[116px] shrink-0 rounded-[10px] bg-card text-[13px] sm:w-[132px]"
-            aria-label="排序"
-          >
+          <SelectTrigger className="h-10 w-[116px] shrink-0 rounded-[10px] bg-card text-[13px] sm:w-[132px]" aria-label="排序">
             <SelectValue />
           </SelectTrigger>
           <SelectContent align="end">
@@ -93,10 +82,15 @@ export function Toolbar({
               type="button"
               onClick={() => onFilterChange(item.value)}
               aria-pressed={active}
-              className={pill(active)}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
+                active
+                  ? "border-ink/30 bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0_/_0.04)]"
+                  : "border-border bg-card text-ink-3 hover:border-ink/20 hover:text-ink"
+              )}
             >
               {item.label}
-              <span className="tabular-nums text-ink-3">{counts[item.value]}</span>
+              <span className="tabular-nums opacity-60">{counts[item.value]}</span>
             </button>
           );
         })}
@@ -104,7 +98,17 @@ export function Toolbar({
 
       {authors.length > 1 && (
         <div className="scrollbar-none -mx-1 flex min-w-0 max-w-full items-center gap-1.5 overflow-x-auto px-1 pb-0.5">
-          <button type="button" onClick={() => onOwnerFilterChange(null)} aria-pressed={ownerFilter === null} className={pill(ownerFilter === null)}>
+          <button
+            type="button"
+            onClick={() => onOwnerFilterChange(null)}
+            aria-pressed={ownerFilter === null}
+            className={cn(
+              "inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
+              ownerFilter === null
+                ? "border-ink/30 bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0_/_0.04)]"
+                : "border-border bg-card text-ink-3 hover:border-ink/20 hover:text-ink"
+            )}
+          >
             全部作者
           </button>
           {authors.map((author) => {
@@ -116,7 +120,12 @@ export function Toolbar({
                 type="button"
                 onClick={() => onOwnerFilterChange(active ? null : key)}
                 aria-pressed={active}
-                className={cn(pill(active), "py-1 pl-1.5 pr-3")}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-3 text-xs whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
+                  active
+                    ? "border-ink/30 bg-card font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0_/_0.04)]"
+                    : "border-border bg-card text-ink-3 hover:border-ink/20 hover:text-ink"
+                )}
               >
                 <AuthorAvatar src={author.avatar} name={author.owner} className="size-5 rounded-full" />
                 {author.owner}
