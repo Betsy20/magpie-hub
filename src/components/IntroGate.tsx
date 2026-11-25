@@ -130,27 +130,31 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
       className="fixed inset-0 z-[100] overflow-y-auto overscroll-contain bg-background/85 p-3 backdrop-blur-sm sm:p-6"
     >
       <div className="mx-auto flex min-h-full w-full max-w-xl items-center justify-center">
-        <div className="w-full rounded-xl border bg-card p-4 text-card-foreground shadow-2xl sm:p-6">
-          <div className="flex items-center gap-2">
+        <div className="w-full rounded-[16px] border bg-card p-5 text-card-foreground shadow-card sm:p-7">
+          <div className="flex items-center gap-2.5">
             <img src={LOGO()} alt="" width={24} height={24} className="size-6 rounded-md border object-cover" />
-            <h2 id="intro-gate-title" className="text-lg font-semibold tracking-tight sm:text-xl">
+            <h2
+              id="intro-gate-title"
+              className="text-[19px] font-semibold tracking-[-0.01em] sm:text-[21px]"
+            >
               使用公告
             </h2>
-            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-              {done ? "可以进入" : `剩余 ${left}s`}
+            <span className="ml-auto font-mono text-[12px] tabular-nums text-ink-3">
+              {done ? "可以进入" : `${left}s`}
             </span>
           </div>
 
-          <div className="mt-4 space-y-4">
-            <section className="space-y-2">
-              <p className="text-sm font-medium">1 · 复制指令直接安装</p>
+          <div className="mt-5 space-y-5">
+            <section className="space-y-2.5">
+              <p className="eyebrow">1 · 复制指令直接安装</p>
               <div className="flex items-start gap-2">
-                <code className="scrollbar-none min-w-0 flex-1 overflow-x-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[11.5px] leading-relaxed whitespace-nowrap text-muted-foreground">
+                <code className="scrollbar-none min-w-0 flex-1 overflow-x-auto rounded-[10px] border bg-code px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-nowrap text-ink">
+                  <span className="text-ink-3">$ </span>
                   {install}
                 </code>
                 <Button
                   size="icon"
-                  variant="secondary"
+                  variant="outline"
                   className="size-8 shrink-0"
                   aria-label="复制安装命令"
                   onClick={() => copy(install, "安装命令已复制")}
@@ -168,22 +172,22 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
                 </Button>
               </div>
               {onNpm && canOpenInMagpie && (
-                <p className="text-xs text-muted-foreground">右侧按钮会在 magpie 里打开插件页，按 Install 完成。</p>
+                <p className="text-[12.5px] text-ink-3">右侧按钮会在 magpie 里打开插件页，按 Install 完成。</p>
               )}
             </section>
 
-            <section className="space-y-2">
-              <p className="text-sm font-medium">2 · 遇到问题，直接把这段发给你的 AI</p>
+            <section className="space-y-2.5">
+              <p className="eyebrow">2 · 遇到问题，直接把这段发给你的 AI</p>
               <div className="relative">
-                <pre className="max-h-[34dvh] overflow-auto rounded-md border bg-muted/40 p-3 pr-12 font-mono text-[11.5px] leading-relaxed break-words whitespace-pre-wrap">
+                <pre className="max-h-[34dvh] overflow-auto rounded-[10px] border bg-code p-3 pr-12 font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-ink-2">
                   {prompt}
                 </pre>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       size="icon"
-                      variant="secondary"
-                      className="absolute right-2 top-2 size-7"
+                      variant="outline"
+                      className="absolute right-2 top-2 size-7 bg-card"
                       aria-label="复制这段描述"
                       onClick={() => copy(prompt, "问题描述已复制")}
                     >
@@ -196,9 +200,9 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
             </section>
           </div>
 
-          <div className="mt-5 space-y-3">
-            <Progress value={progress} className="h-1" />
-            <Button className="h-11 w-full text-[15px] sm:h-9 sm:text-sm" disabled={!done} onClick={enter}>
+          <div className="mt-6 space-y-3">
+            <Progress value={progress} className="h-[3px]" />
+            <Button className="h-10 w-full text-[14px] sm:h-[42px] sm:text-[15px]" disabled={!done} onClick={enter}>
               {done ? "进入插件列表" : `请稍候 ${left}s`}
             </Button>
           </div>
