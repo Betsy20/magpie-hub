@@ -1,0 +1,28 @@
+{
+  "title": "magpie hub",
+  "heading": "公开仓库里的 magpie 插件",
+  "sources": [
+    {
+      "provider": "github",
+      "owner": "MYCF711"
+    },
+    {
+      "provider": "gitee",
+      "owner": "Ghandi"
+    },
+    {
+      "provider": "github",
+      "owner": "3294798852"
+    }
+  ],
+  "include": [],
+  "exclude": [
+    "magpie",
+    "magpie-registry",
+    "magpie-plugin-scaffold",
+    "doubao-work-gateway"
+  ],
+  "pins": [],
+  "liveOnLoad": false,
+  "gateSeconds": 10
+}

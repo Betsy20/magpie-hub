@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN" suppressHydrationWarning>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>magpie hub</title>
+    <meta name="description" content="公开仓库里的 magpie 插件集合，搜索、筛选、一键复制安装命令。" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/png" href="owner.png" />
+    <script>
+      // 首屏就定好主题，避免深色模式下白屏闪一下
+      (function () {
+        try {
+          var saved = localStorage.getItem("theme");
+          var dark = saved === "dark" || ((!saved || saved === "system") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
