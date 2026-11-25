@@ -1,5 +1,6 @@
 import { memo, useState } from "react";
-import { AppWindow, Copy, ExternalLink, Star } from "lucide-react";
+import { motion } from "motion/react";
+import { AppWindow, Check, Copy, ExternalLink, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +18,7 @@ interface PluginCardProps {
   onToggleStar: (plugin: Plugin) => void;
   canOpenInMagpie: boolean;
   isMobile: boolean;
+  index: number;
 }
 
 function PluginLogo({ plugin }: { plugin: Plugin }) {
@@ -49,14 +51,17 @@ function PluginLogo({ plugin }: { plugin: Plugin }) {
   );
 }
 
-function PluginCardBase({ plugin, starred, onToggleStar, canOpenInMagpie, isMobile }: PluginCardProps) {
+function PluginCardBase({ plugin, starred, onToggleStar, canOpenInMagpie, isMobile, index }: PluginCardProps) {
   const repoUrl = plugin.repoUrl;
   const providers = plugin.providers ?? [];
   const target = installTarget(plugin);
   const onNpm = Boolean(plugin.npmVersion);
+  const [copied, setCopied] = useState(false);
 
   function copyInstall() {
     void copyWithToast(plugin.install, "安装命令已复制");
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
   }
 
   function openInMagpie() {
@@ -64,11 +69,19 @@ function PluginCardBase({ plugin, starred, onToggleStar, canOpenInMagpie, isMobi
   }
 
   return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, delay: Math.min(index * 0.018, 0.36), ease: [0.22, 1, 0.36, 1] }}
+      whileHover={{ y: -3 }}
+      whileTap={{ scale: 0.995 }}
+      className="h-full"
+    >
     <Card
       data-plugin={plugin.repo}
       data-provider={plugin.provider}
       className={cn(
-        "group flex flex-col transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md",
+        "group flex h-full flex-col transition-colors duration-200 hover:border-primary/40 hover:shadow-md",
         plugin.paused && "opacity-80"
       )}
     >
@@ -97,7 +110,15 @@ function PluginCardBase({ plugin, starred, onToggleStar, canOpenInMagpie, isMobi
                 aria-label={starred ? "取消收藏" : "收藏"}
                 onClick={() => onToggleStar(plugin)}
               >
-                <Star className={cn("size-4", starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />
+                <motion.span
+                  key={starred ? "on" : "off"}
+                  initial={{ scale: 0.55, rotate: -14 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: "spring", stiffness: 520, damping: 20 }}
+                  className="inline-flex"
+                >
+                  <Star className={cn("size-4", starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />
+                </motion.span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>{starred ? "取消收藏" : "收藏"}</TooltipContent>
@@ -149,8 +170,10 @@ function PluginCardBase({ plugin, starred, onToggleStar, canOpenInMagpie, isMobi
               className="h-7 gap-1 px-2 text-xs"
               onClick={copyInstall}
             >
-              <Copy className="size-3.5" />
-              复制
+              <motion.span key={copied ? "yes" : "no"} initial={{ scale: 0.7, opacity: 0.6 }} animate={{ scale: 1, opacity: 1 }} className="inline-flex">
+                {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              </motion.span>
+              {copied ? "已复制" : "复制"}
             </Button>
             <Button
               variant="outline"
@@ -179,6 +202,7 @@ function PluginCardBase({ plugin, starred, onToggleStar, canOpenInMagpie, isMobi
         </div>
       </CardFooter>
     </Card>
+    </motion.div>
   );
 }
 

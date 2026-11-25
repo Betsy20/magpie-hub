@@ -94,10 +94,18 @@ export default function App() {
 
   // 滚动到一定距离后把搜索/筛选收成一条
   useEffect(() => {
+    let lastY = 0;
     const update = () => {
       const y = window.scrollY || document.documentElement.scrollTop || 0;
+      const delta = y - lastY;
+      lastY = y;
       setScrolledDown(y > 200);
-      if (y < 60) setPanelExpanded(false);
+      if (y < 60) {
+        setPanelExpanded(false);
+      } else if (y > 200 && delta > 2) {
+        // 展开过一次也没用：继续往下滑就重新收成一条
+        setPanelExpanded(false);
+      }
     };
     update();
     window.addEventListener("scroll", update, { passive: true });
@@ -374,7 +382,12 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex min-h-dvh flex-col bg-background">
-        <header className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <header
+          className={cn(
+            "sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur transition-shadow duration-200 supports-[backdrop-filter]:bg-background/60",
+            scrolledDown && "shadow-sm"
+          )}
+        >
           <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:h-16 sm:gap-3 sm:px-6">
             <a
               href="./"
@@ -488,9 +501,10 @@ export default function App() {
             </div>
           ) : rows.length ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-              {rows.map((plugin) => (
+              {rows.map((plugin, index) => (
                 <PluginCard
                   key={`${plugin.provider}:${plugin.owner}/${plugin.repo}`}
+                  index={index}
                   plugin={plugin}
                   starred={isStarred(plugin)}
                   onToggleStar={toggleStar}
@@ -500,7 +514,12 @@ export default function App() {
               ))}
             </div>
           ) : (
-            <div className="mt-2 flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-14 text-center sm:py-20">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.24, ease: "easeOut" }}
+              className="mt-2 flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-14 text-center sm:py-20"
+            >
               <span className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
                 <SearchX className="size-5" />
               </span>
@@ -522,7 +541,7 @@ export default function App() {
                   清除筛选
                 </Button>
               )}
-            </div>
+            </motion.div>
           )}
         </main>
 

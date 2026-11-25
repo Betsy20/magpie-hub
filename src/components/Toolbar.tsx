@@ -83,7 +83,7 @@ export function Toolbar({
               onClick={() => onFilterChange(item.value)}
               aria-pressed={active}
               className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-colors",
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
                 active
                   ? "border-primary/40 bg-primary/10 text-foreground"
                   : "bg-card text-muted-foreground hover:text-foreground"
@@ -103,7 +103,7 @@ export function Toolbar({
             onClick={() => onOwnerFilterChange(null)}
             aria-pressed={ownerFilter === null}
             className={cn(
-              "inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-colors",
+              "inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
               ownerFilter === null
                 ? "border-primary/40 bg-primary/10 text-foreground"
                 : "bg-card text-muted-foreground hover:text-foreground"
@@ -121,7 +121,7 @@ export function Toolbar({
                 onClick={() => onOwnerFilterChange(active ? null : key)}
                 aria-pressed={active}
                 className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-3 text-xs whitespace-nowrap transition-colors",
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-3 text-xs whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
                   active
                     ? "border-primary/40 bg-primary/10 text-foreground"
                     : "bg-card text-muted-foreground hover:text-foreground"
