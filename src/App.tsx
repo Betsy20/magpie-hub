@@ -4,26 +4,21 @@ import { Loader2, Package, RefreshCw, SearchX, Settings2 } from "lucide-react";
 import siteConfig from "../config.json";
 import { IntroGate } from "@/components/IntroGate";
 import { PluginCard } from "@/components/PluginCard";
-import { SettingsDialog } from "@/components/SettingsDialog";
+import { SettingsDialog, type SourceConfig } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Toolbar, type Filter, type Sort } from "@/components/Toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { applyLive, fetchLive, loadSnapshot, type Provider, type Plugin } from "@/lib/data";
+import { applyLive, fetchLive, loadSnapshot, type Plugin } from "@/lib/data";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
-
-interface SourceConfig {
-  provider: Provider;
-  owner?: string;
-  repo?: string;
-}
+import { cn } from "@/lib/utils";
 
 const config = siteConfig as {
   title: string;
   heading: string;
-  sources: SourceConfig[];
+  sources: { provider: "github" | "gitee"; owner?: string; repo?: string }[];
   include: string[];
   exclude: string[];
   pins: string[];
@@ -31,8 +26,9 @@ const config = siteConfig as {
   gateSeconds: number;
 };
 
-const sources = (config.sources ?? []) as SourceConfig[];
-const primaryOwner = sources.find((source) => source.provider === "github" && source.owner)?.owner ?? "MYCF711";
+const defaultSources: SourceConfig[] = (config.sources ?? [])
+  .filter((source) => source.owner)
+  .map((source) => ({ provider: source.provider, owner: source.owner as string }));
 
 function GithubMark({ className }: { className?: string }) {
   return (
@@ -43,7 +39,7 @@ function GithubMark({ className }: { className?: string }) {
 }
 
 export default function App() {
-  const [owner, setOwner] = useState(primaryOwner);
+  const [sources, setSources] = useState<SourceConfig[]>(defaultSources);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
   const [liveAt, setLiveAt] = useState<string | null>(null);
@@ -61,17 +57,51 @@ export default function App() {
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // 手机 / 平板：没有本机 magpie，一键安装只能退回复制命令
+  const isMobile = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    const forced = new URLSearchParams(location.search).get("mobile");
+    if (forced === "1") return true;
+    if (forced === "0") return false;
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia("(pointer: coarse)").matches;
+  }, []);
+
+  // 探测本机 magpie 网关（默认 3425）；no-cors 只看能不能连通，不看内容
+  const [magpieOnline, setMagpieOnline] = useState(false);
+  useEffect(() => {
+    if (isMobile) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 1500);
+    fetch("http://127.0.0.1:3425/", { mode: "no-cors", signal: controller.signal })
+      .then(() => setMagpieOnline(true))
+      .catch(() => setMagpieOnline(false))
+      .finally(() => window.clearTimeout(timer));
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isMobile]);
+
+  const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? "MYCF711";
+
   const isStarred = (plugin: Plugin) =>
     config.pins.includes(plugin.repo) || stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
 
-  async function sync(target = owner, silent = false) {
+  async function sync(list: SourceConfig[] = sources, silent = false) {
+    const githubSources = list.filter((source) => source.provider === "github" && source.owner);
+    if (!githubSources.length) {
+      if (!silent) toast.error("至少要留一个 GitHub 作者才能同步");
+      return false;
+    }
     setSyncing(true);
     try {
-      const { repos, rate: remaining } = await fetchLive(target);
-      setRate(remaining);
-      setPlugins((previous) => applyLive(target, repos, previous));
+      for (const source of githubSources) {
+        const { repos, rate: remaining } = await fetchLive(source.owner);
+        setRate(remaining);
+        setPlugins((previous) => applyLive(source.owner, repos, previous));
+      }
       setLiveAt(new Date().toISOString());
-      if (!silent) toast.success("已同步 GitHub 仓库列表");
+      if (!silent) toast.success(`已同步 ${githubSources.length} 位作者的仓库列表`);
       return true;
     } catch (error) {
       if (!silent) toast.error(error instanceof Error ? error.message : "同步失败");
@@ -81,17 +111,44 @@ export default function App() {
     }
   }
 
+  // 键盘：/ 聚焦搜索，Esc 清空搜索
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target && /^(INPUT|TEXTAREA)$/.test(target.tagName);
+      if (event.key === "/" && !typing && !document.getElementById("intro-gate")) {
+        event.preventDefault();
+        document.querySelector<HTMLInputElement>('input[aria-label="搜索插件"]')?.focus();
+      }
+      if (event.key === "Escape" && typing) {
+        setQuery("");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
 
     (async () => {
-      const snapshot = await loadSnapshot();
-      const fromUrl = new URLSearchParams(location.search).get("owner");
-      const stored = readJson<string>(storageKeys.owner, "");
-      setOwner((fromUrl || stored || primaryOwner).replace(/^@/, "").trim());
+      const stored = readJson<SourceConfig[]>(storageKeys.sources, []);
+      let next = (Array.isArray(stored) && stored.length ? stored : defaultSources).filter(
+        (source) => source?.provider && source?.owner
+      );
 
+      const fromUrl = new URLSearchParams(location.search).get("owner");
+      if (fromUrl) {
+        const owner = fromUrl.replace(/^@/, "").trim();
+        if (owner && !next.some((source) => source.owner === owner)) {
+          next = [{ provider: "github", owner }, ...next];
+        }
+      }
+      setSources(next);
+
+      const snapshot = await loadSnapshot();
       if (snapshot?.plugins?.length) {
         setPlugins(snapshot.plugins);
         setSnapshotAt(snapshot.generatedAt);
@@ -99,7 +156,7 @@ export default function App() {
       setLoading(false);
 
       if (!snapshot?.plugins?.length || readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))) {
-        await sync(primaryOwner, true);
+        await sync(next, true);
       }
     })();
   }, []);
@@ -170,23 +227,23 @@ export default function App() {
     });
   }
 
-  async function handleSave(nextOwner: string, nextLive: boolean) {
-    writeJson(storageKeys.owner, nextOwner);
+  async function handleSave(nextSources: SourceConfig[], nextLive: boolean) {
+    writeJson(storageKeys.sources, nextSources);
     writeJson(storageKeys.live, nextLive);
+    setSources(nextSources);
     setLiveOnLoad(nextLive);
     setSettingsOpen(false);
 
-    if (nextOwner !== owner) {
-      setOwner(nextOwner);
-      // 只清掉上一个 GitHub 作者的条目，Gitee 等其他来源不动
-      setPlugins((previous) => previous.filter((plugin) => plugin.provider !== "github"));
-      setLiveAt(null);
-    }
+    // 被移除的作者，卡片一起撤掉；剩下的保持原样
+    setPlugins((previous) =>
+      previous.filter((plugin) =>
+        nextSources.some((source) => source.provider === plugin.provider && source.owner === plugin.owner)
+      )
+    );
 
     setSaving(true);
-    const ok = await sync(nextOwner);
+    await sync(nextSources);
     setSaving(false);
-    if (ok) toast.success(`已切换到 ${nextOwner}`);
   }
 
   function handleReset() {
@@ -197,7 +254,6 @@ export default function App() {
     location.reload();
   }
 
-  const ownerUrl = `https://github.com/${owner}`;
   const hasFilters = filter !== "all" || query.trim().length > 0;
   const sample = rows[0] ?? pool[0];
 
@@ -224,9 +280,9 @@ export default function App() {
                 className="hidden gap-1.5 px-2 text-muted-foreground min-[380px]:inline-flex"
                 asChild
               >
-                <a href={ownerUrl} target="_blank" rel="noreferrer" aria-label={`${owner} 的 GitHub`}>
+                <a href={`https://github.com/${primaryOwner}`} target="_blank" rel="noreferrer" aria-label="GitHub">
                   <GithubMark className="size-4" />
-                  <span className="hidden sm:inline">@{owner}</span>
+                  <span className="hidden sm:inline">@{primaryOwner}</span>
                 </a>
               </Button>
               <Button variant="outline" size="sm" onClick={() => sync()} disabled={syncing} className="px-2 sm:px-3">
@@ -251,11 +307,35 @@ export default function App() {
             <h1 className="text-balance text-[clamp(1.65rem,4vw+0.9rem,2.4rem)] font-semibold leading-tight tracking-tight">
               {config.heading}
             </h1>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
               <Badge variant="outline" className="gap-1.5 py-1">
                 <Package className="size-3.5" />
                 {counts.all} 个插件
               </Badge>
+              <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-muted-foreground">
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    magpieOnline ? "bg-emerald-500" : "bg-muted-foreground/40"
+                  )}
+                />
+                {isMobile ? "手机端：复制命令到电脑装" : magpieOnline ? "本机 magpie 已运行" : "未检测到本机 magpie"}
+              </span>
+              {sources.map((source) => (
+                <a
+                  key={`${source.provider}:${source.owner}`}
+                  href={
+                    source.provider === "gitee"
+                      ? `https://gitee.com/${source.owner}`
+                      : `https://github.com/${source.owner}`
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <span className="font-mono text-[10px] opacity-60">{source.provider}</span>@{source.owner}
+                </a>
+              ))}
             </div>
           </section>
 
@@ -296,6 +376,8 @@ export default function App() {
                   plugin={plugin}
                   starred={isStarred(plugin)}
                   onToggleStar={() => toggleStar(plugin)}
+                  canOpenInMagpie={magpieOnline && !isMobile}
+                  isMobile={isMobile}
                 />
               ))}
             </div>
@@ -326,36 +408,32 @@ export default function App() {
         </main>
 
         <footer className="mt-auto border-t">
-          <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-7 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-end sm:px-6">
-            <div className="flex flex-wrap items-center gap-4">
-              <a className="hover:text-foreground" href="https://github.com/yetone/magpie" target="_blank" rel="noreferrer">
-                magpie
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-end gap-4 px-4 py-7 text-xs text-muted-foreground sm:px-6">
+            <a className="hover:text-foreground" href="https://github.com/yetone/magpie" target="_blank" rel="noreferrer">
+              magpie
+            </a>
+            {sources.map((source) => (
+              <a
+                key={`footer:${source.provider}:${source.owner}`}
+                className="hover:text-foreground"
+                href={
+                  source.provider === "gitee"
+                    ? `https://gitee.com/${source.owner}`
+                    : `https://github.com/${source.owner}`
+                }
+                target="_blank"
+                rel="noreferrer"
+              >
+                {source.owner}
               </a>
-              {sources
-                .filter((source) => source.owner)
-                .map((source) => (
-                  <a
-                    key={`${source.provider}:${source.owner}`}
-                    className="hover:text-foreground"
-                    href={
-                      source.provider === "gitee"
-                        ? `https://gitee.com/${source.owner}`
-                        : `https://github.com/${source.owner}`
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {source.owner}
-                  </a>
-                ))}
-            </div>
+            ))}
           </div>
         </footer>
 
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
-          owner={owner}
+          sources={sources}
           liveOnLoad={liveOnLoad}
           snapshotAt={snapshotAt}
           liveAt={liveAt}

@@ -53,14 +53,15 @@ npm run preview  # 本地预览产物
 
 | 字段 | 作用 |
 |---|---|
-| `owner` | 默认展示的作者 |
+| `sources` | 作者来源列表（GitHub / Gitee 可混排） |
 | `title` / `subtitle` | 站点标题与副标题 |
 | `exclude` | 不展示的仓库（模板、归档、非插件） |
 | `include` | 强制展示不在 `magpie-*` 命名下的仓库 |
 | `pins` | 置顶仓库 |
 | `liveOnLoad` | 打开页面时是否用 GitHub API 实时同步一次 |
+| `gateSeconds` | 开屏公告的倒计时秒数 |
 
-页面右上角「设置」也能临时换作者、开关自动同步、清除本地数据。
+页面右上角「设置」能增删作者（GitHub 作者实时生效，Gitee 作者需要在 `config.json` 里加完重跑构建）、开关自动同步、清除本地数据。
 
 ## 安装
 
@@ -74,3 +75,5 @@ npm run preview  # 本地预览产物
 - 插件图标取自仓库里的 `registry-entry.json` / `package.json`（`magpie.icon`），构建时缩到 96px PNG 存进 `public/data/icons/`，一张约 10KB；没有图标的用首字母渐变徽标兜底。
 - 实时同步走匿名 GitHub API：每 IP 每小时 60 次，超了页面提示并继续用快照。
 - 响应式：手机单列、平板两列、桌面三列；字号全部用 rem，浏览器放大缩小或调大默认字号都不会挤坏布局。
+- 每张卡片都有「在 magpie 中打开」按钮：npm 上有的插件走 `magpie://plugin?name=` 深链；手机端或没检测到本机 magpie 时，点击直接复制安装命令并给出提示。
+- 开屏使用公告 10 秒倒计时，`?gate=1` 强制显示、`?gate=0` 跳过。

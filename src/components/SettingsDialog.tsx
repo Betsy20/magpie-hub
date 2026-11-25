@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Database, Loader2, RotateCcw } from "lucide-react";
+import { Database, Loader2, Plus, RotateCcw, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,26 +14,43 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import type { Provider } from "@/lib/data";
 import { formatTime } from "@/lib/format";
+
+export interface SourceConfig {
+  provider: Provider;
+  owner: string;
+}
+
+export function parseSource(value: string): SourceConfig | null {
+  const raw = value.trim().replace(/^@/, "");
+  if (!raw) return null;
+  const github = raw.match(/github\.com\/([A-Za-z0-9-]+)/i);
+  if (github) return { provider: "github", owner: github[1] };
+  const gitee = raw.match(/gitee\.com\/([A-Za-z0-9_.-]+)/i);
+  if (gitee) return { provider: "gitee", owner: gitee[1] };
+  if (/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(raw)) return { provider: "github", owner: raw };
+  return null;
+}
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  owner: string;
+  sources: SourceConfig[];
   liveOnLoad: boolean;
   snapshotAt: string | null;
   liveAt: string | null;
   rate: number | null;
   count: number;
   saving: boolean;
-  onSave: (owner: string, liveOnLoad: boolean) => void;
+  onSave: (sources: SourceConfig[], liveOnLoad: boolean) => void;
   onReset: () => void;
 }
 
 export function SettingsDialog({
   open,
   onOpenChange,
-  owner,
+  sources,
   liveOnLoad,
   snapshotAt,
   liveAt,
@@ -42,71 +60,137 @@ export function SettingsDialog({
   onSave,
   onReset
 }: SettingsDialogProps) {
-  const [draftOwner, setDraftOwner] = useState(owner);
+  const [draft, setDraft] = useState<SourceConfig[]>(sources);
   const [draftLive, setDraftLive] = useState(liveOnLoad);
+  const [input, setInput] = useState("");
 
   useEffect(() => {
     if (open) {
-      setDraftOwner(owner);
+      setDraft(sources);
       setDraftLive(liveOnLoad);
+      setInput("");
     }
-  }, [open, owner, liveOnLoad]);
+  }, [open, sources, liveOnLoad]);
+
+  function addSource() {
+    const parsed = parseSource(input);
+    if (!parsed) {
+      toast.error("没看懂，填作者名（如 MYCF711）或主页链接");
+      return;
+    }
+    if (parsed.provider === "gitee") {
+      toast.error("Gitee 作者要写进 config.json 再跑 npm run data");
+      return;
+    }
+    if (draft.some((item) => item.provider === parsed.provider && item.owner === parsed.owner)) {
+      toast.error("这个作者已经在列表里了");
+      return;
+    }
+    setDraft([...draft, parsed]);
+    setInput("");
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="max-h-[88dvh] overflow-y-auto p-4 sm:max-w-md sm:p-6"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
-          <DialogDescription>
-            换 GitHub 作者会实时读取一次仓库列表，Gitee 来源不受影响。
-          </DialogDescription>
+          <DialogDescription>作者可以加多个，GitHub 的会实时读取仓库列表。</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="settings-owner">GitHub 作者</Label>
-            <Input
-              id="settings-owner"
-              value={draftOwner}
-              onChange={(e) => setDraftOwner(e.target.value)}
-              placeholder="例如 MYCF711"
-              autoComplete="off"
-              spellCheck={false}
-            />
+            <Label>作者来源</Label>
+            <ul className="space-y-2">
+              {draft.length === 0 && (
+                <li className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">还没有作者</li>
+              )}
+              {draft.map((source) => (
+                <li
+                  key={`${source.provider}:${source.owner}`}
+                  className="flex items-center gap-2 rounded-lg border px-3 py-2"
+                >
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                    {source.provider === "gitee" ? "gitee" : "github"}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm">@{source.owner}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 shrink-0 text-muted-foreground"
+                    aria-label={`移除 ${source.owner}`}
+                    onClick={() =>
+                      setDraft(
+                        draft.filter((item) => !(item.provider === source.provider && item.owner === source.owner))
+                      )
+                    }
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+
+            <div className="flex gap-2">
+              <Input
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addSource();
+                  }
+                }}
+                placeholder="作者名或主页链接"
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                className="h-11 text-base sm:h-9 sm:text-sm"
+              />
+              <Button variant="secondary" className="h-11 shrink-0 sm:h-9" onClick={addSource}>
+                <Plus className="size-4" />
+                添加
+              </Button>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
-            <div className="space-y-0.5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+            <div className="min-w-0 space-y-0.5">
               <Label htmlFor="settings-live">每次打开都同步</Label>
-              <p className="text-xs text-muted-foreground">打开页面就拉一次 GitHub，匿名接口 60 次/小时。</p>
+              <p className="text-xs text-muted-foreground">匿名接口 60 次/小时</p>
             </div>
             <Switch id="settings-live" checked={draftLive} onCheckedChange={setDraftLive} />
           </div>
 
           <div className="rounded-lg bg-muted/50 p-3 text-xs">
             <div className="flex items-center justify-between gap-3 py-0.5">
-              <span className="text-muted-foreground">本地快照</span>
-              <span className="font-mono">{snapshotAt ? `${formatTime(snapshotAt)} · ${count} 个` : "未构建"}</span>
+              <span className="shrink-0 text-muted-foreground">本地快照</span>
+              <span className="truncate font-mono">
+                {snapshotAt ? `${formatTime(snapshotAt)} · ${count} 个` : "未构建"}
+              </span>
             </div>
             <Separator className="my-1.5" />
             <div className="flex items-center justify-between gap-3 py-0.5">
-              <span className="text-muted-foreground">最近同步</span>
-              <span className="font-mono">{liveAt ? formatTime(liveAt) : "本次未同步"}</span>
+              <span className="shrink-0 text-muted-foreground">最近同步</span>
+              <span className="truncate font-mono">{liveAt ? formatTime(liveAt) : "本次未同步"}</span>
             </div>
             <Separator className="my-1.5" />
             <div className="flex items-center justify-between gap-3 py-0.5">
-              <span className="text-muted-foreground">接口配额</span>
-              <span className="font-mono">{rate === null ? "—" : `${rate} 次 / 小时`}</span>
+              <span className="shrink-0 text-muted-foreground">接口配额</span>
+              <span className="truncate font-mono">{rate === null ? "—" : `${rate} 次 / 小时`}</span>
             </div>
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
           <Button variant="ghost" className="text-muted-foreground" onClick={onReset}>
             <RotateCcw className="size-4" />
             清除本地数据
           </Button>
-          <Button disabled={saving || !draftOwner.trim()} onClick={() => onSave(draftOwner.trim().replace(/^@/, ""), draftLive)}>
+          <Button disabled={saving || draft.length === 0} onClick={() => onSave(draft, draftLive)}>
             {saving ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
             保存并同步
           </Button>

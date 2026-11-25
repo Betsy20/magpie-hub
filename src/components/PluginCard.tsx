@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Plugin } from "@/lib/data";
+import { copyText } from "@/lib/clipboard";
 import { formatDate, hueOf, initialOf } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -13,15 +14,8 @@ interface PluginCardProps {
   plugin: Plugin;
   starred: boolean;
   onToggleStar: () => void;
-}
-
-async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success("安装命令已复制");
-  } catch {
-    toast.error("复制失败，请手动选中安装命令");
-  }
+  canOpenInMagpie: boolean;
+  isMobile: boolean;
 }
 
 function PluginLogo({ plugin }: { plugin: Plugin }) {
@@ -54,10 +48,36 @@ function PluginLogo({ plugin }: { plugin: Plugin }) {
   );
 }
 
-export function PluginCard({ plugin, starred, onToggleStar }: PluginCardProps) {
+export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isMobile }: PluginCardProps) {
   const repoUrl = plugin.repoUrl;
   const providers = plugin.providers ?? [];
   const installTarget = plugin.install.replace(/^magpie plugin add\s+/, "");
+  const onNpm = Boolean(plugin.npmVersion);
+
+  async function copyInstall() {
+    const ok = await copyText(plugin.install);
+    toast[ok ? "success" : "error"](ok ? "安装命令已复制" : "复制失败，请手动选中");
+  }
+
+  function openInMagpie() {
+    if (onNpm && canOpenInMagpie) {
+      window.location.href = `magpie://plugin?name=${encodeURIComponent(plugin.repo)}`;
+      return;
+    }
+    void copyText(plugin.install).then((ok) => {
+      if (!ok) {
+        toast.error("复制失败，请手动选中命令");
+        return;
+      }
+      toast.success(
+        isMobile
+          ? "手机上没有 magpie，命令已复制，到电脑上执行"
+          : onNpm
+            ? "没检测到本机 magpie，命令已复制"
+            : "这个插件没发布到 npm，命令已复制，粘贴到终端即可"
+      );
+    });
+  }
 
   return (
     <Card
@@ -143,27 +163,29 @@ export function PluginCard({ plugin, starred, onToggleStar }: PluginCardProps) {
               variant="secondary"
               size="sm"
               className="h-7 gap-1 px-2 text-xs"
-              onClick={() => copyToClipboard(plugin.install)}
+              onClick={copyInstall}
             >
               <Copy className="size-3.5" />
               复制
             </Button>
-            {plugin.npmVersion && (
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-7"
-                asChild
-                title={`在 magpie 面板中打开（npm v${plugin.npmVersion}），由你确认安装`}
-              >
-                <a
-                  href={`magpie://plugin?name=${encodeURIComponent(plugin.repo)}`}
-                  aria-label="在 magpie 中打开安装面板"
-                >
-                  <AppWindow className="size-3.5" />
-                </a>
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-7"
+              onClick={openInMagpie}
+              aria-label={onNpm && canOpenInMagpie ? "在 magpie 中打开安装页" : "安装（复制命令）"}
+              title={
+                onNpm && canOpenInMagpie
+                  ? "在 magpie 面板中打开，由你确认安装"
+                  : isMobile
+                    ? "手机端：复制命令，到电脑上安装"
+                    : onNpm
+                      ? "没检测到本机 magpie，点击复制命令"
+                      : "未发布到 npm，点击复制命令"
+              }
+            >
+              <AppWindow className="size-3.5" />
+            </Button>
             <Button variant="ghost" size="icon" className="size-7" asChild>
               <a href={repoUrl} target="_blank" rel="noreferrer" aria-label="打开 GitHub 仓库">
                 <ExternalLink className="size-3.5" />

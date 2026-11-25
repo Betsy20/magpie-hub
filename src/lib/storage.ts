@@ -1,5 +1,6 @@
 const KEYS = {
   owner: "magpiehub:owner",
+  sources: "magpiehub:sources",
   stars: "magpiehub:stars",
   live: "magpiehub:live"
 } as const;
