@@ -26,7 +26,7 @@ const FILTERS: { value: Filter; label: string }[] = [
 export function Toolbar({ query, onQueryChange, filter, onFilterChange, sort, onSortChange, counts }: ToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-      <div className="relative min-w-[14rem] flex-1 basis-full sm:basis-0">
+      <div className="relative min-w-0 flex-1">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={query}
@@ -36,6 +36,17 @@ export function Toolbar({ query, onQueryChange, filter, onFilterChange, sort, on
           className="h-10 bg-card pl-9"
         />
       </div>
+
+      <Select value={sort} onValueChange={(value) => onSortChange(value as Sort)}>
+        <SelectTrigger className="h-10 w-[116px] shrink-0 bg-card sm:w-[132px]" aria-label="排序">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent align="end">
+          <SelectItem value="updated">最近更新</SelectItem>
+          <SelectItem value="name">名称 A→Z</SelectItem>
+          <SelectItem value="oldest">最早更新</SelectItem>
+        </SelectContent>
+      </Select>
 
       <ToggleGroup
         type="single"
@@ -56,17 +67,6 @@ export function Toolbar({ query, onQueryChange, filter, onFilterChange, sort, on
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
-
-      <Select value={sort} onValueChange={(value) => onSortChange(value as Sort)}>
-        <SelectTrigger className="h-10 w-full shrink-0 bg-card sm:ml-auto sm:w-[132px]" aria-label="排序">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent align="end">
-          <SelectItem value="updated">最近更新</SelectItem>
-          <SelectItem value="name">名称 A→Z</SelectItem>
-          <SelectItem value="oldest">最早更新</SelectItem>
-        </SelectContent>
-      </Select>
     </div>
   );
 }

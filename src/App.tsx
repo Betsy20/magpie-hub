@@ -4,6 +4,7 @@ import { Loader2, Package, RefreshCw, SearchX, Settings2 } from "lucide-react";
 import siteConfig from "../config.json";
 import { IntroGate } from "@/components/IntroGate";
 import { PluginCard } from "@/components/PluginCard";
+import { ScrollButtons } from "@/components/ScrollButtons";
 import { SettingsDialog, type SourceConfig } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Toolbar, type Filter, type Sort } from "@/components/Toolbar";
@@ -482,6 +483,8 @@ export default function App() {
           onSave={handleSave}
           onReset={handleReset}
         />
+
+        <ScrollButtons />
 
         <IntroGate
           seconds={config.gateSeconds}
