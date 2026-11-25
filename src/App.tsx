@@ -13,7 +13,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { applyLive, fetchLive, loadSnapshot, type Author, type Plugin } from "@/lib/data";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
-import { cn } from "@/lib/utils";
 
 const config = siteConfig as {
   title: string;
@@ -21,7 +20,6 @@ const config = siteConfig as {
   sources: { provider: "github" | "gitee"; owner?: string; repo?: string }[];
   include: string[];
   exclude: string[];
-  pins: string[];
   liveOnLoad: boolean;
   gateSeconds: number;
 };
@@ -42,12 +40,9 @@ export default function App() {
   const [sources, setSources] = useState<SourceConfig[]>(defaultSources);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [authors, setAuthors] = useState<Author[]>([]);
-  const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
-  const [liveAt, setLiveAt] = useState<string | null>(null);
-  const [rate, setRate] = useState<number | null>(null);
+  const [magpie, setMagpie] = useState<{ owner: string; avatar: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -83,7 +78,7 @@ export default function App() {
     };
   }, [isMobile]);
 
-  const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? "MYCF711";
+  const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? null;
   const avatarOf = (provider: string, owner: string) =>
     authors.find((author) => author.provider === provider && author.owner === owner)?.avatar ?? null;
   const authorGroups = (["github", "gitee"] as const)
@@ -95,8 +90,7 @@ export default function App() {
     }))
     .filter((group) => group.items.length > 0);
 
-  const isStarred = (plugin: Plugin) =>
-    config.pins.includes(plugin.repo) || stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
+  const isStarred = (plugin: Plugin) => stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
 
   async function sync(list: SourceConfig[] = sources, silent = false) {
     const githubSources = list.filter((source) => source.provider === "github" && source.owner);
@@ -105,21 +99,25 @@ export default function App() {
       return false;
     }
     setSyncing(true);
-    try {
-      for (const source of githubSources) {
-        const { repos, rate: remaining } = await fetchLive(source.owner);
-        setRate(remaining);
+    let done = 0;
+    let lastError = "";
+    for (const source of githubSources) {
+      try {
+        const { repos } = await fetchLive(source.owner);
         setPlugins((previous) => applyLive(source.owner, repos, previous));
+        done += 1;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "同步失败";
       }
-      setLiveAt(new Date().toISOString());
-      if (!silent) toast.success(`已同步 ${githubSources.length} 位作者的仓库列表`);
-      return true;
-    } catch (error) {
-      if (!silent) toast.error(error instanceof Error ? error.message : "同步失败");
-      return false;
-    } finally {
-      setSyncing(false);
     }
+    setSyncing(false);
+
+    if (!silent) {
+      if (done === 0) toast.error(lastError || "同步失败");
+      else if (done < githubSources.length) toast.warning(`同步了 ${done} 位作者，${lastError}`);
+      else toast.success(`已同步 ${done} 位作者的仓库列表`);
+    }
+    return done > 0;
   }
 
   // 键盘：/ 聚焦搜索，Esc 清空搜索
@@ -127,11 +125,12 @@ export default function App() {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing = target && /^(INPUT|TEXTAREA)$/.test(target.tagName);
-      if (event.key === "/" && !typing && !document.getElementById("intro-gate")) {
+      const dialogOpen = Boolean(document.querySelector('[role="dialog"]'));
+      if (event.key === "/" && !typing && !dialogOpen) {
         event.preventDefault();
         document.querySelector<HTMLInputElement>('input[aria-label="搜索插件"]')?.focus();
       }
-      if (event.key === "Escape" && typing) {
+      if (event.key === "Escape" && typing && !dialogOpen) {
         setQuery("");
       }
     };
@@ -145,10 +144,11 @@ export default function App() {
     booted.current = true;
 
     (async () => {
+      const signature = JSON.stringify(defaultSources);
       const stored = readJson<SourceConfig[]>(storageKeys.sources, []);
-      let next = (Array.isArray(stored) && stored.length ? stored : defaultSources).filter(
-        (source) => source?.provider && source?.owner
-      );
+      const storedSignature = readJson<string>(storageKeys.sourcesSig, "");
+      const useStored = Array.isArray(stored) && stored.length > 0 && storedSignature === signature;
+      let next = (useStored ? stored : defaultSources).filter((source) => source?.provider && source?.owner);
 
       const fromUrl = new URLSearchParams(location.search).get("owner");
       if (fromUrl) {
@@ -162,8 +162,8 @@ export default function App() {
       const snapshot = await loadSnapshot();
       if (snapshot?.plugins?.length) {
         setPlugins(snapshot.plugins);
-        setSnapshotAt(snapshot.generatedAt);
         setAuthors(snapshot.authors ?? []);
+        setMagpie(snapshot.magpie ?? null);
       }
       setLoading(false);
 
@@ -173,17 +173,14 @@ export default function App() {
     })();
   }, []);
 
-  useEffect(() => {
-    const visible = plugins.filter(
-      (plugin) => !config.exclude.includes(plugin.repo) || config.include.includes(plugin.repo)
-    ).length;
-    document.title = `${config.title} · ${visible} 个插件`;
-  }, [plugins]);
+  const isVisible = (plugin: Plugin) =>
+    !config.exclude.includes(plugin.repo) || config.include.includes(plugin.repo);
 
-  const pool = useMemo(
-    () => plugins.filter((plugin) => !config.exclude.includes(plugin.repo) || config.include.includes(plugin.repo)),
-    [plugins]
-  );
+  const pool = useMemo(() => plugins.filter(isVisible), [plugins]);
+
+  useEffect(() => {
+    document.title = `${config.title} · ${pool.length} 个插件`;
+  }, [pool.length]);
 
   const counts = useMemo<Record<Filter, number>>(
     () => ({
@@ -192,7 +189,6 @@ export default function App() {
       starred: pool.filter((plugin) => isStarred(plugin)).length,
       paused: pool.filter((plugin) => plugin.paused).length
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [pool, stars]
   );
 
@@ -227,7 +223,6 @@ export default function App() {
       if (sort === "oldest") return time(a) - time(b);
       return time(b) - time(a);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pool, query, filter, sort, stars]);
 
   function toggleStar(plugin: Plugin) {
@@ -241,6 +236,7 @@ export default function App() {
 
   async function handleSave(nextSources: SourceConfig[], nextLive: boolean) {
     writeJson(storageKeys.sources, nextSources);
+    writeJson(storageKeys.sourcesSig, JSON.stringify(defaultSources));
     writeJson(storageKeys.live, nextLive);
     setSources(nextSources);
     setLiveOnLoad(nextLive);
@@ -253,21 +249,25 @@ export default function App() {
       )
     );
 
-    setSaving(true);
     await sync(nextSources);
-    setSaving(false);
   }
 
   function handleReset() {
     Object.values(storageKeys).forEach((key) => localStorage.removeItem(key));
+    try {
+      sessionStorage.removeItem(storageKeys.intro);
+    } catch {
+      /* 忽略 */
+    }
     setSettingsOpen(false);
     setStars([]);
+    localStorage.removeItem("theme");
     setLiveOnLoad(Boolean(config.liveOnLoad));
     location.reload();
   }
 
   const hasFilters = filter !== "all" || query.trim().length > 0;
-  const sample = rows[0] ?? pool[0];
+  const sample = pool.find((plugin) => !plugin.paused) ?? pool[0];
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -286,17 +286,19 @@ export default function App() {
             </a>
 
             <div className="ml-auto flex items-center gap-1.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="hidden gap-1.5 px-2 text-muted-foreground min-[380px]:inline-flex"
-                asChild
-              >
-                <a href={`https://github.com/${primaryOwner}`} target="_blank" rel="noreferrer" aria-label="GitHub">
-                  <GithubMark className="size-4" />
-                  <span className="hidden sm:inline">@{primaryOwner}</span>
-                </a>
-              </Button>
+              {primaryOwner && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="hidden gap-1.5 px-2 text-muted-foreground min-[380px]:inline-flex"
+                  asChild
+                >
+                  <a href={`https://github.com/${primaryOwner}`} target="_blank" rel="noreferrer" aria-label="GitHub">
+                    <GithubMark className="size-4" />
+                    <span className="hidden sm:inline">@{primaryOwner}</span>
+                  </a>
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => sync()} disabled={syncing} className="px-2 sm:px-3">
                 {syncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                 <span className="hidden min-[380px]:inline">同步</span>
@@ -324,15 +326,6 @@ export default function App() {
                 <Package className="size-3.5" />
                 {counts.all} 个插件
               </Badge>
-              <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-muted-foreground">
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    magpieOnline ? "bg-emerald-500" : "bg-muted-foreground/40"
-                  )}
-                />
-                {isMobile ? "手机端：复制命令到电脑装" : magpieOnline ? "本机 magpie 已运行" : "未检测到本机 magpie"}
-              </span>
               {sources.map((source) => (
                 <a
                   key={`${source.provider}:${source.owner}`}
@@ -430,8 +423,18 @@ export default function App() {
 
         <footer className="mt-auto border-t">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-6 text-xs text-muted-foreground sm:px-6">
-            <a className="hover:text-foreground" href="https://github.com/yetone/magpie" target="_blank" rel="noreferrer">
-              magpie
+            <a
+              className="inline-flex items-center gap-1.5 hover:text-foreground"
+              href="https://github.com/yetone/magpie"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {magpie?.avatar ? (
+                <img src={new URL(magpie.avatar, document.baseURI).href} alt="" className="size-5 rounded-full" />
+              ) : (
+                <span className="grid size-5 place-items-center rounded-full bg-muted text-[9px] uppercase">Y</span>
+              )}
+              magpie <span className="opacity-60">@{magpie?.owner ?? "yetone"}</span>
             </a>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
               {authorGroups.map((group) => (
@@ -476,7 +479,6 @@ export default function App() {
           onOpenChange={setSettingsOpen}
           sources={sources}
           liveOnLoad={liveOnLoad}
-          saving={saving}
           onSave={handleSave}
           onReset={handleReset}
         />

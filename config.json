@@ -22,7 +22,6 @@
     "magpie-plugin-scaffold",
     "doubao-work-gateway"
   ],
-  "pins": [],
   "liveOnLoad": false,
   "gateSeconds": 10
 }

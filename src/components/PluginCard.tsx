@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Plugin } from "@/lib/data";
-import { copyText } from "@/lib/clipboard";
+import { installTarget } from "../../shared/filters.mjs";
+import { copyText, copyWithToast } from "@/lib/clipboard";
 import { formatDate, hueOf, initialOf } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -51,17 +52,16 @@ function PluginLogo({ plugin }: { plugin: Plugin }) {
 export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isMobile }: PluginCardProps) {
   const repoUrl = plugin.repoUrl;
   const providers = plugin.providers ?? [];
-  const installTarget = plugin.install.replace(/^magpie plugin add\s+/, "");
+  const target = installTarget(plugin);
   const onNpm = Boolean(plugin.npmVersion);
 
-  async function copyInstall() {
-    const ok = await copyText(plugin.install);
-    toast[ok ? "success" : "error"](ok ? "安装命令已复制" : "复制失败，请手动选中");
+  function copyInstall() {
+    void copyWithToast(plugin.install, "安装命令已复制");
   }
 
   function openInMagpie() {
     if (onNpm && canOpenInMagpie) {
-      window.location.href = `magpie://plugin?name=${encodeURIComponent(plugin.repo)}`;
+      window.location.href = `magpie://plugin?name=${encodeURIComponent(plugin.npmName ?? plugin.repo)}`;
       return;
     }
     void copyText(plugin.install).then((ok) => {
@@ -145,7 +145,7 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
       <CardFooter className="mt-auto flex-col items-stretch gap-2.5 px-4 pb-4 pt-0 sm:px-5 sm:pb-5">
         <code className="block rounded-md bg-muted px-2.5 py-1.5 font-mono text-[0.7rem] leading-snug text-muted-foreground">
           <span className="block text-[0.65rem] opacity-70">magpie plugin add</span>
-          <span className="block truncate text-foreground/80">{installTarget}</span>
+          <span className="block truncate text-foreground/80">{target}</span>
         </code>
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-[0.7rem] text-muted-foreground/80">

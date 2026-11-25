@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppWindow, Copy } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { copyText } from "@/lib/clipboard";
+import { copyText, copyWithToast } from "@/lib/clipboard";
 import type { Plugin } from "@/lib/data";
 
-const STORAGE_KEY = "magpiehub:intro-seen";
+import { storageKeys } from "@/lib/storage";
+
+const STORAGE_KEY = storageKeys.intro;
 const LOGO = () => new URL("owner.png", document.baseURI).href;
 
 function buildPrompt(sample?: Plugin) {
@@ -18,11 +19,6 @@ function buildPrompt(sample?: Plugin) {
 我遇到的问题：<用一句话说清楚就行，比如：登录之后模型列表是空的>
 
 帮我看看是怎么回事。如果确认是插件本身的问题，请直接给作者提 issue 或 PR。`;
-}
-
-async function copy(text: string, message: string) {
-  const ok = await copyText(text);
-  toast[ok ? "success" : "error"](ok ? message : "复制失败，请手动选中");
 }
 
 interface IntroGateProps {
@@ -58,12 +54,10 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
 
   function installNow() {
     if (onNpm && canOpenInMagpie && sample) {
-      window.location.href = `magpie://plugin?name=${encodeURIComponent(sample.repo)}`;
+      window.location.href = `magpie://plugin?name=${encodeURIComponent(sample.npmName ?? sample.repo)}`;
       return;
     }
-    void copyText(install).then((ok) => {
-      toast[ok ? "success" : "error"](ok ? "安装命令已复制" : "复制失败，请手动选中");
-    });
+    void copyWithToast(install, "安装命令已复制");
   }
 
   const enter = useCallback(() => {
@@ -117,7 +111,7 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
   if (!open) return null;
 
   const done = left <= 0;
-  const progress = ((seconds - left) / seconds) * 100;
+  const progress = seconds > 0 ? ((seconds - left) / seconds) * 100 : 100;
 
   return (
     <div
@@ -153,7 +147,7 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
                   variant="secondary"
                   className="size-8 shrink-0"
                   aria-label="复制安装命令"
-                  onClick={() => copy(install, "安装命令已复制")}
+                  onClick={() => copyWithToast(install, "安装命令已复制")}
                 >
                   <Copy className="size-3.5" />
                 </Button>
@@ -185,7 +179,7 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
                       variant="secondary"
                       className="absolute right-2 top-2 size-7"
                       aria-label="复制这段描述"
-                      onClick={() => copy(prompt, "问题描述已复制")}
+                      onClick={() => copyWithToast(prompt, "问题描述已复制")}
                     >
                       <Copy className="size-3.5" />
                     </Button>
