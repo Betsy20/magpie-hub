@@ -89,13 +89,28 @@ const tree = await api(`/repos/${owner}/${name}/git/trees`, {
 });
 console.log(`tree ${tree.sha.slice(0, 7)}`);
 
-// 3. commit（用本地元数据，SHA 与本地一致）
+// 3. 远端当前 HEAD 作为父提交（本机连不上 github.com，本地仓库与远端各自独立）
+let remoteHead = null;
+try {
+  remoteHead = (await api(`/repos/${owner}/${name}/git/ref/heads/${branch}`)).object.sha;
+} catch {
+  remoteHead = null;
+}
+
+if (remoteHead) {
+  const remoteCommit = await api(`/repos/${owner}/${name}/git/commits/${remoteHead}`);
+  if (remoteCommit.tree.sha === tree.sha) {
+    console.log("内容与远端一致，不用推送");
+    process.exit(0);
+  }
+}
+
 const commit = await api(`/repos/${owner}/${name}/git/commits`, {
   method: "POST",
   body: JSON.stringify({
     message,
     tree: tree.sha,
-    parents: [],
+    parents: remoteHead ? [remoteHead] : [],
     author: { name: authorName, email: authorEmail, date: authorDate },
     committer: { name: committerName, email: committerEmail, date: committerDate }
   })
@@ -118,4 +133,4 @@ try {
   console.log(`更新分支 ${branch}`);
 }
 
-console.log(commit.sha === head ? "远程与本地一致 ✓" : `注意：远程 ${commit.sha} 与本地 ${head} 不同`);
+console.log(`https://github.com/${owner}/${name}/commit/${commit.sha}`);
