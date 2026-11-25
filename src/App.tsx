@@ -12,6 +12,8 @@ import {
   SlidersHorizontal
 } from "lucide-react";
 import siteConfig from "../config.json";
+import { GithubMark } from "@/components/GithubMark";
+import { GithubDialog } from "@/components/GithubDialog";
 import { IntroGate } from "@/components/IntroGate";
 import { PluginCard } from "@/components/PluginCard";
 import { ScrollButtons } from "@/components/ScrollButtons";
@@ -23,6 +25,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { applyLive, fetchLive, loadSnapshot, type Author, type Plugin } from "@/lib/data";
 import { formatDate } from "@/lib/format";
+import {
+  fetchStarred,
+  fetchViewer,
+  mapLimit,
+  readGithubToken,
+  setStarred,
+  writeGithubToken,
+  type GithubViewer
+} from "@/lib/github";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
@@ -52,14 +63,6 @@ const FILTER_LABEL: Record<Filter, string> = {
   starred: "收藏",
   paused: "已停维护"
 };
-
-function GithubMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
-      <path d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.55v-2.1c-3.2.69-3.88-1.35-3.88-1.35-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.18-1.49 3.14-1.18 3.14-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.25 5.69.41.36.78 1.06.78 2.14v3.17c0 .3.2.66.8.55A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5Z" />
-    </svg>
-  );
-}
 
 type Platform = "mac" | "windows" | "linux" | "other";
 
@@ -168,8 +171,14 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("updated");
-  const [stars, setStars] = useState<string[]>(() => readJson<string[]>(storageKeys.stars, []));
   const [channel, setChannel] = useState<Channel>("latest");
+  // 收藏 = GitHub 仓库的真实 star：token 只在本机，stars 缓存已 star 的 owner/repo
+  const [ghToken, setGhToken] = useState<string>(() => readGithubToken());
+  const [ghViewer, setGhViewer] = useState<GithubViewer | null>(null);
+  const [ghStars, setGhStars] = useState<Set<string>>(() => new Set<string>());
+  const [starBusy, setStarBusy] = useState<Set<string>>(() => new Set<string>());
+  const [ghOpen, setGhOpen] = useState(false);
+  const [ghError, setGhError] = useState<string | null>(null);
   const [liveOnLoad, setLiveOnLoad] = useState<boolean>(() =>
     readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))
   );
@@ -237,7 +246,8 @@ export default function App() {
     avatar: avatarOf(source.provider, source.owner)
   }));
 
-  const isStarred = (plugin: Plugin) => stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
+  const starKey = (plugin: Plugin) => `${plugin.owner}/${plugin.repo}`.toLowerCase();
+  const isStarred = (plugin: Plugin) => ghStars.has(starKey(plugin));
 
   async function sync(list: SourceConfig[] = sources, silent = false) {
     const githubSources = list.filter((source) => source.provider === "github" && source.owner);
@@ -338,7 +348,7 @@ export default function App() {
       paused: pool.filter((plugin) => plugin.paused).length
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pool, stars]
+    [pool, ghStars]
   );
 
   const rows = useMemo(() => {
@@ -372,15 +382,126 @@ export default function App() {
       return time(b) - time(a);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pool, query, filter, sort, stars]);
+  }, [pool, query, filter, sort, ghStars]);
 
-  function toggleStar(plugin: Plugin) {
-    const id = `${plugin.provider}:${plugin.owner}/${plugin.repo}`;
-    setStars((previous) => {
-      const next = previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id];
-      writeJson(storageKeys.stars, next);
-      return next;
+  // token 变了就先验一遍，验不过直接清掉，别让用户对着无效 token 点空
+  useEffect(() => {
+    if (!ghToken) {
+      setGhViewer(null);
+      setGhStars(new Set<string>());
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const viewer = await fetchViewer(ghToken);
+        if (!cancelled) {
+          setGhViewer(viewer);
+          setGhError(null);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setGhViewer(null);
+        setGhError(error instanceof Error ? error.message : "token 校验失败");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ghToken]);
+
+  // 当前列表里每个 GitHub 仓库拉一次 star 状态，并发 5，避免触发二级限流
+  const githubRepoKeys = useMemo(
+    () =>
+      Array.from(new Set(pool.filter((plugin) => plugin.provider === "github").map(starKey))).join(","),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pool]
+  );
+
+  useEffect(() => {
+    if (!ghToken || !githubRepoKeys) return;
+    let cancelled = false;
+    void (async () => {
+      const entries = await mapLimit(githubRepoKeys.split(","), 5, async (key) => {
+        const [owner, repo] = key.split("/");
+        try {
+          return [key, await fetchStarred(ghToken, owner, repo)] as const;
+        } catch {
+          return [key, null] as const;
+        }
+      });
+      if (cancelled) return;
+      setGhStars((previous) => {
+        const next = new Set(previous);
+        for (const [key, value] of entries) {
+          if (value === true) next.add(key);
+          else if (value === false) next.delete(key);
+        }
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ghToken, githubRepoKeys]);
+
+  async function toggleStar(plugin: Plugin) {
+    if (plugin.provider !== "github") {
+      toast.error("Gitee 仓库还不支持一键 star，点右侧外链去仓库页收藏");
+      return;
+    }
+    if (!ghToken) {
+      setGhOpen(true);
+      return;
+    }
+    const key = starKey(plugin);
+    if (starBusy.has(key)) return;
+    const next = !ghStars.has(key);
+    setStarBusy((previous) => new Set(previous).add(key));
+    setGhStars((previous) => {
+      const updated = new Set(previous);
+      if (next) updated.add(key);
+      else updated.delete(key);
+      return updated;
     });
+    try {
+      await setStarred(ghToken, plugin.owner, plugin.repo, next);
+      toast.success(next ? `已在 GitHub star ${plugin.repo}` : `已取消 star ${plugin.repo}`);
+    } catch (error) {
+      setGhStars((previous) => {
+        const updated = new Set(previous);
+        if (next) updated.delete(key);
+        else updated.add(key);
+        return updated;
+      });
+      toast.error(error instanceof Error ? error.message : "star 失败");
+    } finally {
+      setStarBusy((previous) => {
+        const updated = new Set(previous);
+        updated.delete(key);
+        return updated;
+      });
+    }
+  }
+
+  async function connectGithub(token: string) {
+    const viewer = await fetchViewer(token);
+    writeGithubToken(token);
+    setGhToken(token);
+    setGhViewer(viewer);
+    setGhError(null);
+    setGhOpen(false);
+    toast.success(`已连接 @${viewer.login}，收藏会写进 GitHub`);
+  }
+
+  function disconnectGithub() {
+    writeGithubToken("");
+    setGhToken("");
+    setGhViewer(null);
+    setGhStars(new Set<string>());
+    setGhError(null);
+    setGhOpen(false);
+    toast.message("已断开 GitHub，收藏状态不再同步");
   }
 
   async function handleSave(nextSources: SourceConfig[], nextLive: boolean) {
@@ -412,7 +533,7 @@ export default function App() {
       /* 忽略 */
     }
     setSettingsOpen(false);
-    setStars([]);
+    writeGithubToken("");
     localStorage.removeItem("theme");
     setLiveOnLoad(Boolean(config.liveOnLoad));
     location.reload();
@@ -513,6 +634,25 @@ export default function App() {
             </nav>
 
             <div className="ml-auto flex items-center gap-1 md:ml-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={ghViewer ? `GitHub @${ghViewer.login}` : "连接 GitHub"}
+                    onClick={() => setGhOpen(true)}
+                  >
+                    {ghViewer?.avatar ? (
+                      <img src={ghViewer.avatar} alt="" className="size-5 rounded-full border" />
+                    ) : (
+                      <GithubMark className="size-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {ghViewer ? `@${ghViewer.login} · 收藏即 star` : "连接 GitHub，收藏即 star"}
+                </TooltipContent>
+              </Tooltip>
               <Button variant="ghost" size="sm" onClick={() => sync()} disabled={syncing} className="gap-1.5 px-2">
                 {syncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                 <span className="hidden text-[13px] min-[560px]:inline">同步</span>
@@ -731,7 +871,8 @@ export default function App() {
                     key={`${plugin.provider}:${plugin.owner}/${plugin.repo}`}
                     plugin={plugin}
                     starred={isStarred(plugin)}
-                    onToggleStar={() => toggleStar(plugin)}
+                    onToggleStar={() => void toggleStar(plugin)}
+                    starBusy={starBusy.has(starKey(plugin))}
                     canOpenInMagpie={magpieOnline && !isMobile}
                     isMobile={isMobile}
                   />
@@ -905,6 +1046,15 @@ export default function App() {
         </footer>
 
         <ScrollButtons />
+
+        <GithubDialog
+          open={ghOpen}
+          onOpenChange={setGhOpen}
+          viewer={ghViewer}
+          error={ghError}
+          onConnect={connectGithub}
+          onDisconnect={disconnectGithub}
+        />
 
         <SettingsDialog
           open={settingsOpen}

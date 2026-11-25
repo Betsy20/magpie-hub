@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AppWindow, Copy, ExternalLink, Star } from "lucide-react";
+import { AppWindow, Copy, ExternalLink, Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ interface PluginCardProps {
   plugin: Plugin;
   starred: boolean;
   onToggleStar: () => void;
+  starBusy?: boolean;
   canOpenInMagpie: boolean;
   isMobile: boolean;
 }
@@ -45,7 +46,7 @@ function PluginLogo({ plugin }: { plugin: Plugin }) {
   );
 }
 
-export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isMobile }: PluginCardProps) {
+export function PluginCard({ plugin, starred, onToggleStar, starBusy, canOpenInMagpie, isMobile }: PluginCardProps) {
   const repoUrl = plugin.repoUrl;
   const providers = plugin.providers ?? [];
   const target = installTarget(plugin);
@@ -85,11 +86,19 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
 
           <div className="min-w-0 flex-1 space-y-1">
             <CardTitle className="truncate text-[16px] leading-snug">
-              <a href={repoUrl} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+              <a
+                href={repoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="transition-colors hover:text-ink-2"
+              >
                 {plugin.displayName || plugin.repo}
               </a>
             </CardTitle>
-            <p className="truncate font-mono text-[12px] leading-relaxed text-ink-3">
+            <p
+              className="truncate font-mono text-[12px] leading-relaxed text-ink-3"
+              title={`${plugin.host}/${plugin.owner}/${plugin.repo}`}
+            >
               {plugin.host}/{plugin.owner}/{plugin.repo}
             </p>
           </div>
@@ -101,13 +110,19 @@ export function PluginCard({ plugin, starred, onToggleStar, canOpenInMagpie, isM
                 size="icon"
                 className="size-7 shrink-0"
                 aria-pressed={starred}
-                aria-label={starred ? "取消收藏" : "收藏"}
+                aria-busy={starBusy}
+                aria-label={starred ? "取消 star" : "star 到 GitHub"}
+                disabled={starBusy}
                 onClick={onToggleStar}
               >
-                <Star className={cn("size-[15px]", starred ? "fill-ink text-ink" : "text-ink-3")} />
+                {starBusy ? (
+                  <Loader2 className="size-[15px] animate-spin text-ink-3" />
+                ) : (
+                  <Star className={cn("size-[15px]", starred ? "fill-ink text-ink" : "text-ink-3")} />
+                )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{starred ? "取消收藏" : "收藏"}</TooltipContent>
+            <TooltipContent>{starred ? "已 star，点击取消" : "star 到 GitHub"}</TooltipContent>
           </Tooltip>
         </div>
 
