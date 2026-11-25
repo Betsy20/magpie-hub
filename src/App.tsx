@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { toast } from "sonner";
-import { Loader2, Package, RefreshCw, SearchX, Settings2 } from "lucide-react";
+import { ChevronDown, Loader2, Package, RefreshCw, SearchX, Settings2, SlidersHorizontal } from "lucide-react";
 import siteConfig from "../config.json";
 import { IntroGate } from "@/components/IntroGate";
 import { PluginCard } from "@/components/PluginCard";
@@ -8,16 +9,15 @@ import { ScrollButtons } from "@/components/ScrollButtons";
 import { SettingsDialog, type SourceConfig } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Toolbar, type Filter, type Sort } from "@/components/Toolbar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { applyLive, fetchLive, loadSnapshot, type Author, type Plugin } from "@/lib/data";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
+import { cn } from "@/lib/utils";
 
 const config = siteConfig as {
   title: string;
-  heading: string;
   sources: { provider: "github" | "gitee"; owner?: string; repo?: string }[];
   include: string[];
   exclude: string[];
@@ -28,6 +28,13 @@ const config = siteConfig as {
 const defaultSources: SourceConfig[] = (config.sources ?? [])
   .filter((source) => source.owner)
   .map((source) => ({ provider: source.provider, owner: source.owner as string }));
+
+const FILTER_LABEL: Record<Filter, string> = {
+  all: "全部",
+  active: "可用",
+  starred: "收藏",
+  paused: "已停维护"
+};
 
 function GithubMark({ className }: { className?: string }) {
   return (
@@ -48,11 +55,15 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("updated");
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [stars, setStars] = useState<string[]>(() => readJson<string[]>(storageKeys.stars, []));
   const [liveOnLoad, setLiveOnLoad] = useState<boolean>(() =>
     readJson<boolean>(storageKeys.live, Boolean(config.liveOnLoad))
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panelExpanded, setPanelExpanded] = useState(false);
+  const [scrolledDown, setScrolledDown] = useState(false);
+  const [forceCollapsed] = useState(() => new URLSearchParams(location.search).get("panel") === "collapsed");
 
   // 手机 / 平板：没有本机 magpie，一键安装只能退回复制命令
   const isMobile = useMemo(() => {
@@ -79,6 +90,22 @@ export default function App() {
     };
   }, [isMobile]);
 
+  // 滚动到一定距离后把搜索/筛选收成一条
+  useEffect(() => {
+    const update = () => {
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      setScrolledDown(y > 200);
+      if (y < 60) setPanelExpanded(false);
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    const timer = window.setInterval(update, 500);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const primaryOwner = sources.find((source) => source.provider === "github")?.owner ?? null;
   const avatarOf = (provider: string, owner: string) =>
     authors.find((author) => author.provider === provider && author.owner === owner)?.avatar ?? null;
@@ -90,6 +117,11 @@ export default function App() {
         .map((source) => ({ ...source, avatar: avatarOf(source.provider, source.owner) }))
     }))
     .filter((group) => group.items.length > 0);
+  const authorOptions = sources.map((source) => ({
+    provider: source.provider,
+    owner: source.owner,
+    avatar: avatarOf(source.provider, source.owner)
+  }));
 
   const isStarred = (plugin: Plugin) => stars.includes(`${plugin.provider}:${plugin.owner}/${plugin.repo}`);
 
@@ -177,11 +209,15 @@ export default function App() {
   const isVisible = (plugin: Plugin) =>
     !config.exclude.includes(plugin.repo) || config.include.includes(plugin.repo);
 
-  const pool = useMemo(() => plugins.filter(isVisible), [plugins]);
+  const visible = useMemo(() => plugins.filter(isVisible), [plugins]);
+  const pool = useMemo(
+    () => (ownerFilter ? visible.filter((plugin) => `${plugin.provider}:${plugin.owner}` === ownerFilter) : visible),
+    [visible, ownerFilter]
+  );
 
   useEffect(() => {
-    document.title = `${config.title} · ${pool.length} 个插件`;
-  }, [pool.length]);
+    document.title = `${config.title} · ${visible.length} 个插件`;
+  }, [visible.length]);
 
   const counts = useMemo<Record<Filter, number>>(
     () => ({
@@ -215,11 +251,10 @@ export default function App() {
       return haystack.includes(q);
     });
 
-    const weight = (plugin: Plugin) => (isStarred(plugin) ? 0 : 1);
     const time = (plugin: Plugin) => new Date(plugin.updatedAt).getTime() || 0;
 
+    // 收藏只改图标，不参与排序，避免点一下整页卡片跳位
     return filtered.sort((a, b) => {
-      if (weight(a) !== weight(b)) return weight(a) - weight(b);
       if (sort === "name") return (a.displayName || a.repo).localeCompare(b.displayName || b.repo, "zh-CN");
       if (sort === "oldest") return time(a) - time(b);
       return time(b) - time(a);
@@ -243,7 +278,7 @@ export default function App() {
     setLiveOnLoad(nextLive);
     setSettingsOpen(false);
 
-    // 被移除的作者，卡片一起撤掉；剩下的保持原样
+    setOwnerFilter(null);
     setPlugins((previous) =>
       previous.filter((plugin) =>
         nextSources.some((source) => source.provider === plugin.provider && source.owner === plugin.owner)
@@ -267,15 +302,32 @@ export default function App() {
     location.reload();
   }
 
-  const hasFilters = filter !== "all" || query.trim().length > 0;
-  const sample = pool.find((plugin) => !plugin.paused) ?? pool[0];
+  function scrollToTop() {
+    const root = document.documentElement;
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    window.scrollTo(0, 0);
+    root.style.scrollBehavior = previous;
+  }
+
+  const hasFilters = filter !== "all" || query.trim().length > 0 || ownerFilter !== null;
+  const sample = visible.find((plugin) => !plugin.paused) ?? visible[0];
+  const collapsed = (forceCollapsed || scrolledDown) && !panelExpanded;
+  const activeOwner = ownerFilter?.split(":")[1] ?? null;
 
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex min-h-dvh flex-col bg-background">
         <header className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:h-16 sm:gap-3 sm:px-6">
-            <a href="./" className="flex shrink-0 items-center gap-2 font-semibold tracking-tight whitespace-nowrap">
+            <a
+              href="./"
+              onClick={(event) => {
+                event.preventDefault();
+                scrollToTop();
+              }}
+              className="flex shrink-0 items-center gap-2 font-semibold tracking-tight whitespace-nowrap"
+            >
               <img
                 src={new URL("owner.png", document.baseURI).href}
                 alt=""
@@ -318,52 +370,54 @@ export default function App() {
         </header>
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-16 sm:px-6 sm:pb-20">
-          <section className="pt-8 sm:pt-12">
-            <h1 className="text-balance text-[clamp(1.65rem,4vw+0.9rem,2.4rem)] font-semibold leading-tight tracking-tight">
-              {config.heading}
-            </h1>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="outline" className="gap-1.5 py-1">
-                <Package className="size-3.5" />
-                {counts.all} 个插件
-              </Badge>
-              {sources.map((source) => (
-                <a
-                  key={`${source.provider}:${source.owner}`}
-                  href={
-                    source.provider === "gitee"
-                      ? `https://gitee.com/${source.owner}`
-                      : `https://github.com/${source.owner}`
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {avatarOf(source.provider, source.owner) ? (
-                    <img
-                      src={new URL(avatarOf(source.provider, source.owner) as string, document.baseURI).href}
-                      alt=""
-                      className="size-4 rounded-full"
-                    />
-                  ) : (
-                    <span className="font-mono text-[10px] opacity-60">{source.provider}</span>
-                  )}
-                  @{source.owner}
-                </a>
-              ))}
-            </div>
-          </section>
+          <h1 className="sr-only">公开仓库里的 magpie 插件</h1>
 
-          <div className="sticky top-14 z-30 -mx-4 mt-5 bg-background/85 px-4 py-3 backdrop-blur sm:top-16 sm:-mx-6 sm:px-6">
-            <Toolbar
-              query={query}
-              onQueryChange={setQuery}
-              filter={filter}
-              onFilterChange={setFilter}
-              sort={sort}
-              onSortChange={setSort}
-              counts={counts}
-            />
+          <div
+            className="sticky top-14 z-30 -mx-4 bg-background/90 px-4 py-2.5 backdrop-blur sm:top-16 sm:-mx-6 sm:px-6"
+            data-collapsed={collapsed}
+            data-scrolled={scrolledDown}
+          >
+            {collapsed ? (
+                <motion.button
+                  key="mini"
+                  type="button"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                  onClick={() => setPanelExpanded(true)}
+                  className="flex h-10 w-full items-center gap-2 rounded-full border bg-card px-3.5 text-xs text-muted-foreground shadow-sm"
+                >
+                  <SlidersHorizontal className="size-3.5" />
+                  <span className="truncate text-foreground">
+                    {FILTER_LABEL[filter]}
+                    {activeOwner ? ` · @${activeOwner}` : ""}
+                    {query.trim() ? ` · “${query.trim()}”` : ""}
+                  </span>
+                  <span className="tabular-nums opacity-60">{rows.length} 个</span>
+                  <ChevronDown className="ml-auto size-4 shrink-0" />
+                </motion.button>
+              ) : (
+                <motion.div
+                  key="full"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                >
+                  <Toolbar
+                    query={query}
+                    onQueryChange={setQuery}
+                    filter={filter}
+                    onFilterChange={setFilter}
+                    sort={sort}
+                    onSortChange={setSort}
+                    counts={counts}
+                    authors={authorOptions}
+                    ownerFilter={ownerFilter}
+                    onOwnerFilterChange={setOwnerFilter}
+                    total={pool.length}
+                  />
+                </motion.div>
+              )}
           </div>
 
           {loading ? (
@@ -384,7 +438,7 @@ export default function App() {
               ))}
             </div>
           ) : rows.length ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+            <motion.div layout className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
               {rows.map((plugin) => (
                 <PluginCard
                   key={`${plugin.provider}:${plugin.owner}/${plugin.repo}`}
@@ -395,7 +449,7 @@ export default function App() {
                   isMobile={isMobile}
                 />
               ))}
-            </div>
+            </motion.div>
           ) : (
             <div className="mt-2 flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-14 text-center sm:py-20">
               <span className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
@@ -413,6 +467,7 @@ export default function App() {
                   onClick={() => {
                     setQuery("");
                     setFilter("all");
+                    setOwnerFilter(null);
                   }}
                 >
                   清除筛选
@@ -452,7 +507,10 @@ export default function App() {
                         }
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 transition-colors hover:text-foreground"
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 transition-colors hover:text-foreground",
+                          ownerFilter === `${item.provider}:${item.owner}` && "border-primary/40 text-foreground"
+                        )}
                       >
                         {item.avatar ? (
                           <img
@@ -475,6 +533,8 @@ export default function App() {
           </div>
         </footer>
 
+        <ScrollButtons />
+
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
@@ -483,8 +543,6 @@ export default function App() {
           onSave={handleSave}
           onReset={handleReset}
         />
-
-        <ScrollButtons />
 
         <IntroGate
           seconds={config.gateSeconds}

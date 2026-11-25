@@ -1,15 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppWindow, Copy } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { AppWindow, ArrowRight, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { copyText, copyWithToast } from "@/lib/clipboard";
+import { copyWithToast } from "@/lib/clipboard";
 import type { Plugin } from "@/lib/data";
-
 import { storageKeys } from "@/lib/storage";
 
-const STORAGE_KEY = storageKeys.intro;
+const SEEN_TTL = 12 * 60 * 60 * 1000; // 12 小时内不再弹
 const LOGO = () => new URL("owner.png", document.baseURI).href;
+
+function hasSeen() {
+  try {
+    if (sessionStorage.getItem(storageKeys.intro)) return true;
+  } catch {
+    /* 忽略 */
+  }
+  try {
+    const at = Number(localStorage.getItem(storageKeys.intro) ?? 0);
+    return Date.now() - at < SEEN_TTL;
+  } catch {
+    return false;
+  }
+}
+
+function markSeen() {
+  const now = String(Date.now());
+  try {
+    sessionStorage.setItem(storageKeys.intro, now);
+  } catch {
+    /* 忽略 */
+  }
+  try {
+    localStorage.setItem(storageKeys.intro, now);
+  } catch {
+    /* 忽略 */
+  }
+}
 
 function buildPrompt(sample?: Plugin) {
   const name = sample?.repo ?? "<插件名>";
@@ -40,17 +67,18 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
   const [open, setOpen] = useState(() => {
     if (skipped) return false;
     if (forced) return true;
-    try {
-      return !sessionStorage.getItem(STORAGE_KEY);
-    } catch {
-      return true;
-    }
+    return !hasSeen();
   });
-  const [left, setLeft] = useState(seconds);
+  const [ready, setReady] = useState(seconds <= 0);
   const rootRef = useRef<HTMLDivElement>(null);
   const prompt = buildPrompt(sample);
   const install = sample?.install ?? "magpie plugin add github:<作者>/<仓库>";
   const onNpm = Boolean(sample?.npmVersion);
+
+  const enter = useCallback(() => {
+    setOpen(false);
+    markSeen();
+  }, []);
 
   function installNow() {
     if (onNpm && canOpenInMagpie && sample) {
@@ -60,24 +88,12 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
     void copyWithToast(install, "安装命令已复制");
   }
 
-  const enter = useCallback(() => {
-    setOpen(false);
-    try {
-      sessionStorage.setItem(STORAGE_KEY, String(Date.now()));
-    } catch {
-      /* 忽略 */
-    }
-  }, []);
-
   useEffect(() => {
     if (!open) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    setLeft(seconds);
 
-    const timer = window.setInterval(() => {
-      setLeft((value) => (value <= 1 ? 0 : value - 1));
-    }, 1000);
+    const timer = window.setTimeout(() => setReady(true), Math.max(0, seconds) * 1000);
 
     const blockKeys = (event: KeyboardEvent) => {
       if (event.key === "Escape" || event.key === "Esc") {
@@ -101,103 +117,129 @@ export function IntroGate({ seconds, sample, canOpenInMagpie, isMobile }: IntroG
     rootRef.current?.focus();
 
     return () => {
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
       document.removeEventListener("keydown", blockKeys, true);
       observer.disconnect();
       document.body.style.overflow = previousOverflow;
     };
   }, [open, seconds]);
 
-  if (!open) return null;
-
-  const done = left <= 0;
-  const progress = seconds > 0 ? ((seconds - left) / seconds) * 100 : 100;
-
   return (
-    <div
-      ref={rootRef}
-      id="intro-gate"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="intro-gate-title"
-      tabIndex={-1}
-      className="fixed inset-0 z-[100] overflow-y-auto overscroll-contain bg-background/85 p-3 backdrop-blur-sm sm:p-6"
-    >
-      <div className="mx-auto flex min-h-full w-full max-w-xl items-center justify-center">
-        <div className="w-full rounded-xl border bg-card p-4 text-card-foreground shadow-2xl sm:p-6">
-          <div className="flex items-center gap-2">
-            <img src={LOGO()} alt="" width={24} height={24} className="size-6 rounded-md border object-cover" />
-            <h2 id="intro-gate-title" className="text-lg font-semibold tracking-tight sm:text-xl">
-              使用公告
-            </h2>
-            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-              {done ? "可以进入" : `剩余 ${left}s`}
-            </span>
-          </div>
-
-          <div className="mt-4 space-y-4">
-            <section className="space-y-2">
-              <p className="text-sm font-medium">1 · 复制指令直接安装</p>
-              <div className="flex items-start gap-2">
-                <code className="scrollbar-none min-w-0 flex-1 overflow-x-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[11.5px] leading-relaxed whitespace-nowrap text-muted-foreground">
-                  {install}
-                </code>
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className="size-8 shrink-0"
-                  aria-label="复制安装命令"
-                  onClick={() => copyWithToast(install, "安装命令已复制")}
-                >
-                  <Copy className="size-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  className="size-8 shrink-0"
-                  aria-label={onNpm && canOpenInMagpie ? "在 magpie 中安装" : "安装（复制命令）"}
-                  title={onNpm && canOpenInMagpie ? "在 magpie 中打开，按 Install" : "复制安装命令"}
-                  onClick={installNow}
-                >
-                  <AppWindow className="size-3.5" />
-                </Button>
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          ref={rootRef}
+          id="intro-gate"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="intro-gate-title"
+          tabIndex={-1}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.22, ease: "easeOut" }}
+          className="fixed inset-0 z-[100] overflow-y-auto overscroll-contain bg-background/85 p-3 backdrop-blur-md sm:p-6"
+        >
+          <div className="mx-auto flex min-h-full w-full max-w-xl items-center justify-center">
+            <motion.div
+              initial={{ opacity: 0, y: 14, scale: 0.985 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full rounded-2xl border bg-card p-4 text-card-foreground shadow-2xl sm:p-6"
+            >
+              <div className="flex items-center gap-2">
+                <img src={LOGO()} alt="" width={24} height={24} className="size-6 rounded-md border object-cover" />
+                <h2 id="intro-gate-title" className="text-lg font-semibold tracking-tight sm:text-xl">
+                  使用公告
+                </h2>
               </div>
-              {onNpm && canOpenInMagpie && (
-                <p className="text-xs text-muted-foreground">右侧按钮会在 magpie 里打开插件页，按 Install 完成。</p>
-              )}
-            </section>
 
-            <section className="space-y-2">
-              <p className="text-sm font-medium">2 · 遇到问题，直接把这段发给你的 AI</p>
-              <div className="relative">
-                <pre className="max-h-[34dvh] overflow-auto rounded-md border bg-muted/40 p-3 pr-12 font-mono text-[11.5px] leading-relaxed break-words whitespace-pre-wrap">
-                  {prompt}
-                </pre>
-                <Tooltip>
-                  <TooltipTrigger asChild>
+              <div className="mt-4 space-y-4">
+                <section className="space-y-2">
+                  <p className="text-sm font-medium">1 · 复制指令直接安装</p>
+                  <div className="flex items-start gap-2">
+                    <code className="scrollbar-none min-w-0 flex-1 overflow-x-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[11.5px] leading-relaxed whitespace-nowrap text-muted-foreground">
+                      {install}
+                    </code>
                     <Button
                       size="icon"
                       variant="secondary"
-                      className="absolute right-2 top-2 size-7"
-                      aria-label="复制这段描述"
-                      onClick={() => copyWithToast(prompt, "问题描述已复制")}
+                      className="size-8 shrink-0"
+                      aria-label="复制安装命令"
+                      onClick={() => copyWithToast(install, "安装命令已复制")}
                     >
                       <Copy className="size-3.5" />
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>复制这段</TooltipContent>
-                </Tooltip>
-              </div>
-            </section>
-          </div>
+                    <Button
+                      size="icon"
+                      className="size-8 shrink-0"
+                      aria-label={onNpm && canOpenInMagpie ? "在 magpie 中安装" : "安装（复制命令）"}
+                      title={onNpm && canOpenInMagpie ? "在 magpie 中打开，按 Install" : "复制安装命令"}
+                      onClick={installNow}
+                    >
+                      <AppWindow className="size-3.5" />
+                    </Button>
+                  </div>
+                  {onNpm && canOpenInMagpie && (
+                    <p className="text-xs text-muted-foreground">右侧按钮会在 magpie 里打开插件页，按 Install 完成。</p>
+                  )}
+                </section>
 
-          <div className="mt-5 space-y-3">
-            <Progress value={progress} className="h-1" />
-            <Button className="h-11 w-full text-[15px] sm:h-9 sm:text-sm" disabled={!done} onClick={enter}>
-              {done ? "进入插件列表" : `请稍候 ${left}s`}
-            </Button>
+                <section className="space-y-2">
+                  <p className="text-sm font-medium">2 · 遇到问题，直接把这段发给你的 AI</p>
+                  <div className="relative">
+                    <pre className="max-h-[34dvh] overflow-auto rounded-md border bg-muted/40 p-3 pr-12 font-mono text-[11.5px] leading-relaxed break-words whitespace-pre-wrap">
+                      {prompt}
+                    </pre>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="secondary"
+                          className="absolute right-2 top-2 size-7"
+                          aria-label="复制这段描述"
+                          onClick={() => copyWithToast(prompt, "问题描述已复制")}
+                        >
+                          <Copy className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>复制这段</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </section>
+              </div>
+
+              <div className="mt-5">
+                <Button
+                  className="group relative h-11 w-full overflow-hidden text-[15px]"
+                  variant={ready ? "default" : "secondary"}
+                  disabled={!ready}
+                  onClick={enter}
+                >
+                  {!ready && (
+                    <motion.span
+                      aria-hidden
+                      className="absolute inset-y-0 left-0 bg-primary/25"
+                      initial={{ width: "0%" }}
+                      animate={{ width: "100%" }}
+                      transition={{ duration: Math.max(seconds, 0.1), ease: "linear" }}
+                    />
+                  )}
+                  <span className="relative inline-flex items-center gap-2">
+                    {ready ? (
+                      <>
+                        进入插件列表
+                        <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                      </>
+                    ) : (
+                      "正在载入…"
+                    )}
+                  </span>
+                </Button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      </div>
-    </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

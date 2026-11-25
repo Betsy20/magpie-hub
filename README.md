@@ -66,4 +66,7 @@ npm run preview  # 本地预览产物
 - 实时同步走匿名 GitHub API：每 IP 每小时 60 次，超了页面提示并继续用快照。
 - 响应式：手机单列、平板两列、桌面三列；字号全部用 rem，浏览器放大缩小或调大默认字号都不会挤坏布局。
 - 作者头像（含 magpie 作者 yetone）在构建时下载到 `public/data/authors/`，页脚按 GitHub / Gitee 分组显示。
+- 工具栏三行：搜索 + 排序、状态筛选、作者筛选（都能横向滑动）；页面向下滚动后收紧成一条，点开恢复。
+- 动画用 [motion](https://github.com/motiondivision/motion)：公告入场、工具栏收起、回到顶部/到底部的缓动滚动。
+- `.github/workflows/refresh.yml` 每 6 小时重建一次快照并提交，Gitee 作者的数据靠它自动更新（Gitee API 没有 CORS，浏览器端拉不了）。
 - 开屏使用公告 10 秒倒计时，`?gate=1` 强制显示、`?gate=0` 跳过。手机端没有 magpie（iOS 无客户端），安装按钮退回复制命令。

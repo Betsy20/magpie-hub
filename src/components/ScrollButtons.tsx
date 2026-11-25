@@ -1,22 +1,38 @@
 import { useEffect, useState } from "react";
+import { animate } from "motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/** 直接跳到位；html 上写了 scroll-behavior: smooth，临时关掉再跳才可靠。 */
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+/** 用 motion 做缓动滚动；环境不跑动画帧时，结束后直接跳到位。 */
 function scrollToY(target: number) {
   const root = document.documentElement;
-  const previous = root.style.scrollBehavior;
-  root.style.scrollBehavior = "auto";
-  window.scrollTo(0, target);
-  root.style.scrollBehavior = previous;
-  window.requestAnimationFrame(() => {
-    if (Math.abs(window.scrollY - target) < 2) return;
-    const again = root.style.scrollBehavior;
-    root.style.scrollBehavior = "auto";
-    window.scrollTo(0, target);
-    root.style.scrollBehavior = again;
+  const from = window.scrollY || root.scrollTop || 0;
+  const distance = Math.abs(target - from);
+  if (distance < 2) return;
+
+  const duration = Math.min(0.9, 0.32 + distance / 7000);
+  const controls = animate(from, target, {
+    duration,
+    ease: EASE,
+    onUpdate: (value) => {
+      root.scrollTop = value;
+      document.body.scrollTop = value;
+    }
   });
+
+  window.setTimeout(() => {
+    controls.stop();
+    const current = window.scrollY || root.scrollTop || 0;
+    if (Math.abs(current - target) < 8) return;
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    root.scrollTop = target;
+    document.body.scrollTop = target;
+    root.style.scrollBehavior = previous;
+  }, duration * 1000 + 250);
 }
 
 /** 右下角悬浮的「回到顶部 / 到最底部」按钮，页面不够长时自动隐藏。 */
@@ -26,11 +42,12 @@ export function ScrollButtons() {
   useEffect(() => {
     const update = () => {
       const root = document.documentElement;
+      const y = window.scrollY || root.scrollTop || 0;
       const max = root.scrollHeight - root.clientHeight;
       setState({
         scrollable: max > 160,
-        atTop: window.scrollY < 8,
-        atBottom: window.scrollY > max - 8
+        atTop: y < 8,
+        atBottom: y > max - 8
       });
     };
     update();
@@ -55,7 +72,7 @@ export function ScrollButtons() {
         aria-label="回到顶部"
         aria-disabled={state.atTop}
         onClick={() => scrollToY(0)}
-        className={cn("size-9 bg-background/90 shadow-sm backdrop-blur", state.atTop && "opacity-40")}
+        className={cn("size-9 bg-background/90 shadow-sm backdrop-blur transition-opacity", state.atTop && "opacity-40")}
       >
         <ChevronUp className="size-4" />
       </Button>
@@ -65,7 +82,10 @@ export function ScrollButtons() {
         aria-label="到最底部"
         aria-disabled={state.atBottom}
         onClick={() => scrollToY(document.documentElement.scrollHeight)}
-        className={cn("size-9 bg-background/90 shadow-sm backdrop-blur", state.atBottom && "opacity-40")}
+        className={cn(
+          "size-9 bg-background/90 shadow-sm backdrop-blur transition-opacity",
+          state.atBottom && "opacity-40"
+        )}
       >
         <ChevronDown className="size-4" />
       </Button>
